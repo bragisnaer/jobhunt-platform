@@ -1927,8 +1927,9 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
       const sy = window.scrollY || window.pageYOffset || 0;
       const gap = 16;
       const margin = 8;
-      // Prefer the side opposite the frame (frame in the right half → panel left;
-      // frame in the left half → panel right of the page). Falls through if no room.
+      // Stay on the same side as the frame, so the panel sits next to the
+      // headshot instead of across the document (frame in the left half →
+      // panel left of the page). Falls through to the other side if no room.
       const frameOnRightHalf = (fr.left + fr.right) / 2 > (pr.left + pr.right) / 2;
       const placeLeft = () => pr.left - PANEL_W - gap;
       const placeRight = () => pr.right + gap;
@@ -1936,16 +1937,16 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
       const fitsRight = (x) => x + PANEL_W <= window.innerWidth - margin;
       let vLeft;
       if (frameOnRightHalf) {
-        vLeft = placeLeft();
-        if (!fitsLeft(vLeft)) {
-          const rt = placeRight();
-          vLeft = fitsRight(rt) ? rt : Math.max(margin, Math.min(window.innerWidth - PANEL_W - margin, pr.left));
-        }
-      } else {
         vLeft = placeRight();
         if (!fitsRight(vLeft)) {
           const lt = placeLeft();
           vLeft = fitsLeft(lt) ? lt : Math.max(margin, Math.min(window.innerWidth - PANEL_W - margin, pr.left));
+        }
+      } else {
+        vLeft = placeLeft();
+        if (!fitsLeft(vLeft)) {
+          const rt = placeRight();
+          vLeft = fitsRight(rt) ? rt : Math.max(margin, Math.min(window.innerWidth - PANEL_W - margin, pr.left));
         }
       }
       const vTop = fr.top;
