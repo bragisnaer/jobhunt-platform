@@ -1,0 +1,28 @@
+# Personal documents — never commit
+*.pdf
+uploads/
+extracted/
+*.zip
+
+# Secrets
+.env*
+!.env.example
+
+# Local editor and tool directories
+.vscode/
+.idea/
+.cache/
+.*-local/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+
+# Node (if tooling is ever added)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
