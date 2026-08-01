@@ -403,11 +403,31 @@
     to   { opacity: 1; transform: translateX(0); }
   }
   .hs-controls-head {
-    padding: 8px 12px; border-bottom: 1px solid #2a2520;
+    padding: 8px 8px 8px 12px; border-bottom: 1px solid #2a2520;
     background: #1c1d20;
     font-size: 9.5px; letter-spacing: 1.4px; text-transform: uppercase;
     color: rgba(255, 255, 255, 0.55); font-weight: 600;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    cursor: grab; user-select: none;
   }
+  .hs-controls-head:active { cursor: grabbing; }
+  .hs-controls.dragged { animation: none; }
+  .hs-head-actions { display: inline-flex; gap: 2px; }
+  .hs-head-actions button {
+    background: transparent; border: none; color: #fff; opacity: 0.5;
+    cursor: pointer; font: inherit; font-size: 13px; line-height: 1;
+    padding: 2px 5px; border-radius: 4px; letter-spacing: 0;
+  }
+  .hs-head-actions button:hover { opacity: 1; background: #2a2520; }
+  /* Reopen pill, mirroring the Tweaks pill but on the opposite corner */
+  .hs-reopen {
+    position: fixed; bottom: 16px; left: 16px; z-index: 1000;
+    background: #17181a; color: #fff; border: 1px solid #3a342d;
+    border-radius: 999px; padding: 8px 14px; font-size: 12px; cursor: pointer;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .25); font-family: 'Inter Tight', sans-serif;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .hs-reopen:hover { background: #222326; }
   .hs-controls-body {
     padding: 12px; display: flex; flex-direction: column; gap: 12px;
   }
@@ -1971,16 +1991,90 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
     };
     update();
     window.addEventListener('resize', queue);
+    // Zoom is an inline style on .cv-stage, and changing it is not a window
+    // resize, so without these observers the panel kept a stale position until
+    // something else in the dep array changed — which is why toggling Edit
+    // appeared to "fix" it.
+    const stage = frameRef.current && frameRef.current.closest('.cv-stage');
+    const mo = stage ? new MutationObserver(queue) : null;
+    if (mo) mo.observe(stage, { attributes: true, attributeFilter: ['style', 'data-zoom'] });
+    // Catches everything else that moves the frame: fonts loading, sections
+    // reflowing, the sidebar re-splitting across pages.
+    const page = frameRef.current && frameRef.current.closest('.cv-page');
+    const ro = page && window.ResizeObserver ? new ResizeObserver(queue) : null;
+    if (ro) ro.observe(page);
     return () => {
       if (raf) cancelAnimationFrame(raf);
       window.removeEventListener('resize', queue);
+      if (mo) mo.disconnect();
+      if (ro) ro.disconnect();
     };
   }, [editable, src, t.size, t.align]);
 
-  const controls = editable && panelPos ? (
-    <div className="hs-controls screen-only" style={{ left: panelPos.left, top: panelPos.top, width: PANEL_W }}>
-      <div className="hs-controls-head">
+  // Panel window state: hidden until reopened, and free-dragged position.
+  // dragPos !== null means the user placed it, so auto-anchoring stands down.
+  const [hsHidden, setHsHidden] = React.useState(() => {
+    try { return localStorage.getItem('cv-hs-hidden') === '1'; } catch { return false; }
+  });
+  const hidePanel = (hidden) => {
+    setHsHidden(hidden);
+    try { localStorage.setItem('cv-hs-hidden', hidden ? '1' : '0'); } catch {}
+  };
+  // Prefixed: the image itself already owns `dragging` / `dragState` for panning.
+  const [panelDragPos, setPanelDragPos] = React.useState(null);
+  const [panelDragging, setPanelDragging] = React.useState(false);
+  const panelDragState = React.useRef(null);
+  React.useEffect(() => {
+    if (!panelDragging) return;
+    const move = (e) => {
+      const d = panelDragState.current;
+      if (!d) return;
+      const sx = window.scrollX || 0, sy = window.scrollY || 0;
+      // Clamp to the viewport so the panel can never be dragged out of reach.
+      const maxLeft = sx + window.innerWidth - PANEL_W - 8;
+      const maxTop = sy + window.innerHeight - 40;
+      setPanelDragPos({
+        left: Math.max(sx + 8, Math.min(maxLeft, d.left + e.clientX - d.sx)),
+        top: Math.max(sy + 8, Math.min(maxTop, d.top + e.clientY - d.sy)),
+      });
+    };
+    const up = () => { panelDragState.current = null; setPanelDragging(false); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+  }, [panelDragging]);
+  const onPanelDragDown = (e) => {
+    if (e.target.closest('button')) return;
+    const base = panelDragPos || panelPos;
+    if (!base) return;
+    panelDragState.current = { sx: e.clientX, sy: e.clientY, left: base.left, top: base.top };
+    setPanelDragging(true);
+    e.preventDefault();
+  };
+
+  const pos = panelDragPos || panelPos;
+  const controls = editable && hsHidden ? (
+    <button type="button" className="hs-reopen screen-only"
+      onClick={() => hidePanel(false)} title="Show headshot controls">
+      ◲ Headshot
+    </button>
+  ) : editable && pos ? (
+    <div className={`hs-controls screen-only${panelDragPos ? ' dragged' : ''}`}
+      style={{ left: pos.left, top: pos.top, width: PANEL_W }}>
+      <div className="hs-controls-head" onPointerDown={onPanelDragDown}
+        title="Drag to move this panel">
         <span>Headshot</span>
+        <span className="hs-head-actions">
+          {panelDragPos && (
+            <button type="button" onClick={() => setPanelDragPos(null)}
+              title="Snap back next to the headshot">⟲</button>
+          )}
+          <button type="button" onClick={() => hidePanel(true)}
+            title="Hide this panel">×</button>
+        </span>
       </div>
       <div className="hs-controls-body">
         <div className="hs-group">
