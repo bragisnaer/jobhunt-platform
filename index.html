@@ -354,13 +354,32 @@
     .sync-banner { display: none !important; }
   }
 
-  /* Tweaks panel (bottom-right) */
+  /* Tweaks panel (bottom-right by default, draggable) */
   .tweaks-panel {
     position: fixed; bottom: 16px; right: 16px; z-index: 1000;
-    background: #17181a; color: #fff; padding: 12px 14px; border-radius: 10px;
-    font-size: 12px; max-width: 280px; max-height: 80vh; overflow-y: auto;
+    background: #17181a; color: #fff; border-radius: 10px;
+    font-size: 12px; width: 280px; max-height: 80vh;
     box-shadow: 0 6px 24px rgba(0,0,0,.25);
+    display: flex; flex-direction: column; overflow: hidden;
   }
+  /* Grab bar. Mirrors .hs-controls-head so the two panels read as one family. */
+  .tweaks-head {
+    padding: 8px 8px 8px 14px; border-bottom: 1px solid #2a2520;
+    background: #1c1d20; flex-shrink: 0;
+    font-size: 9.5px; letter-spacing: 1.4px; text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55); font-weight: 600;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    cursor: grab; user-select: none;
+  }
+  .tweaks-head:active { cursor: grabbing; }
+  .tweaks-head-actions { display: inline-flex; gap: 2px; }
+  .tweaks-head-actions button {
+    background: transparent; border: none; color: #fff; opacity: 0.5;
+    cursor: pointer; font: inherit; font-size: 13px; line-height: 1;
+    padding: 2px 5px; border-radius: 4px; letter-spacing: 0;
+  }
+  .tweaks-head-actions button:hover { opacity: 1; background: #2a2520; }
+  .tweaks-body { padding: 12px 14px; overflow-y: auto; }
   .tweaks-panel h4 { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase; opacity: .75; font-weight: 600; }
   .tweaks-panel .group { border-top: 1px solid #2a2520; padding-top: 10px; margin-top: 10px; }
   .tweaks-panel .group:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
@@ -1809,6 +1828,52 @@ function EdDotList({ items, onChange, ink, inkSoft }) {
 }
 
 // ════════════════════════════════════════════════════════════════
+//  Draggable floating panels
+// ════════════════════════════════════════════════════════════════
+// Shared drag-by-handle behaviour for the floating panels (headshot controls,
+// tweaks). dragPos stays null until the user actually drags, which is how each
+// panel knows to keep using its own default anchoring until then.
+//   docCoords: true  → left/top include scroll offset (position: absolute)
+//   docCoords: false → viewport coords (position: fixed)
+function usePanelDrag({ width, handleH = 40, docCoords = false }) {
+  const [dragPos, setDragPos] = React.useState(null);
+  const [dragging, setDragging] = React.useState(false);
+  const start = React.useRef(null);
+  React.useEffect(() => {
+    if (!dragging) return;
+    const move = (e) => {
+      const s = start.current;
+      if (!s) return;
+      const ox = docCoords ? (window.scrollX || 0) : 0;
+      const oy = docCoords ? (window.scrollY || 0) : 0;
+      // Clamp so a panel can never be dragged somewhere unreachable.
+      const maxLeft = ox + window.innerWidth - width - 8;
+      const maxTop = oy + window.innerHeight - handleH;
+      setDragPos({
+        left: Math.max(ox + 8, Math.min(maxLeft, s.left + e.clientX - s.sx)),
+        top: Math.max(oy + 8, Math.min(maxTop, s.top + e.clientY - s.sy)),
+      });
+    };
+    const up = () => { start.current = null; setDragging(false); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+  }, [dragging, width, handleH, docCoords]);
+  // base is where the panel currently sits, in whichever coord space it uses.
+  const onGrab = (e, base) => {
+    if (e.target.closest('button')) return;
+    if (!base) return;
+    start.current = { sx: e.clientX, sy: e.clientY, left: base.left, top: base.top };
+    setDragging(true);
+    e.preventDefault();
+  };
+  return { dragPos, setDragPos, onGrab };
+}
+
+// ════════════════════════════════════════════════════════════════
 //  Headshot editor — upload, shape crop, pan, zoom, resize
 // ════════════════════════════════════════════════════════════════
 function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClear }) {
@@ -2020,40 +2085,10 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
     setHsHidden(hidden);
     try { localStorage.setItem('cv-hs-hidden', hidden ? '1' : '0'); } catch {}
   };
-  // Prefixed: the image itself already owns `dragging` / `dragState` for panning.
-  const [panelDragPos, setPanelDragPos] = React.useState(null);
-  const [panelDragging, setPanelDragging] = React.useState(false);
-  const panelDragState = React.useRef(null);
-  React.useEffect(() => {
-    if (!panelDragging) return;
-    const move = (e) => {
-      const d = panelDragState.current;
-      if (!d) return;
-      const sx = window.scrollX || 0, sy = window.scrollY || 0;
-      // Clamp to the viewport so the panel can never be dragged out of reach.
-      const maxLeft = sx + window.innerWidth - PANEL_W - 8;
-      const maxTop = sy + window.innerHeight - 40;
-      setPanelDragPos({
-        left: Math.max(sx + 8, Math.min(maxLeft, d.left + e.clientX - d.sx)),
-        top: Math.max(sy + 8, Math.min(maxTop, d.top + e.clientY - d.sy)),
-      });
-    };
-    const up = () => { panelDragState.current = null; setPanelDragging(false); };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    return () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-    };
-  }, [panelDragging]);
-  const onPanelDragDown = (e) => {
-    if (e.target.closest('button')) return;
-    const base = panelDragPos || panelPos;
-    if (!base) return;
-    panelDragState.current = { sx: e.clientX, sy: e.clientY, left: base.left, top: base.top };
-    setPanelDragging(true);
-    e.preventDefault();
-  };
+  // The panel is positioned in document coords, so the drag must be too.
+  const { dragPos: panelDragPos, setDragPos: setPanelDragPos, onGrab } =
+    usePanelDrag({ width: PANEL_W, docCoords: true });
+  const onPanelDragDown = (e) => onGrab(e, panelDragPos || panelPos);
 
   const pos = panelDragPos || panelPos;
   const controls = editable && hsHidden ? (
@@ -3727,6 +3762,15 @@ function TweaksPanel({ editOn, cv, update, headshotSrc }) {
       return next;
     });
   };
+  // Declared above the collapsed early-return so the hook order stays stable.
+  // The panel is position:fixed, so the drag works in viewport coords.
+  const panelRef = React.useRef(null);
+  const { dragPos, setDragPos, onGrab } = usePanelDrag({ width: 280 });
+  const onHeadDown = (e) => {
+    // First grab: the panel is still corner-anchored, so read where it actually is.
+    const r = panelRef.current && panelRef.current.getBoundingClientRect();
+    onGrab(e, dragPos || (r ? { left: r.left, top: r.top } : null));
+  };
   if (collapsed) {
     return (
       <button type="button" onClick={toggleCollapsed} title="Show tweaks"
@@ -3802,16 +3846,19 @@ function TweaksPanel({ editOn, cv, update, headshotSrc }) {
     // Note: leaves cv[meta.dataKey] orphaned; harmless, no UI references it.
   };
   return (
-    <div className="tweaks-panel">
-      <button type="button" onClick={toggleCollapsed} title="Hide tweaks"
-        style={{
-          position: 'absolute', top: 2, right: 2,
-          width: 32, height: 32, padding: 0, lineHeight: 1,
-          background: 'transparent', border: 'none', color: '#fff',
-          opacity: 0.6, cursor: 'pointer', fontSize: 18,
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 2,
-        }}>×</button>
+    <div className="tweaks-panel" ref={panelRef}
+      style={dragPos ? { left: dragPos.left, top: dragPos.top, right: 'auto', bottom: 'auto' } : undefined}>
+      <div className="tweaks-head" onPointerDown={onHeadDown} title="Drag to move this panel">
+        <span>Tweaks</span>
+        <span className="tweaks-head-actions">
+          {dragPos && (
+            <button type="button" onClick={() => setDragPos(null)}
+              title="Snap back to the corner">⟲</button>
+          )}
+          <button type="button" onClick={toggleCollapsed} title="Hide tweaks">×</button>
+        </span>
+      </div>
+      <div className="tweaks-body">
       <h4>Color scheme</h4>
       <div className="swatches">
         {COLOR_SCHEMES.map(s => (
@@ -3887,7 +3934,9 @@ function TweaksPanel({ editOn, cv, update, headshotSrc }) {
         <h4>Tips</h4>
         <div style={{ fontSize: 11, lineHeight: 1.5, opacity: 0.8 }}>
           Click any text to edit. Drag image to pan; scroll to zoom; corner handle resizes the frame; pick a shape from the icon row.
+          Both floating panels can be dragged by their title bar.
         </div>
+      </div>
       </div>
     </div>
   );
