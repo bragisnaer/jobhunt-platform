@@ -986,14 +986,17 @@ const V1_RULE = '#d8d4cb';
 const V1_FONT = "'Inter Tight', 'Helvetica Neue', Helvetica, Arial, sans-serif";
 const V1_MONO = 'ui-monospace, "SF Mono", Menlo, monospace';
 
-// Optional footer credit line. Toggled by cv.showCredit (default on); the sentence
-// is overridable per application via cv.creditText. The host is fixed — it is the
-// project's identity, and a fork linking here is correct attribution.
-const CREDIT_TEXT_DEFAULT = 'Built and typeset in JobHunt Platform, a single-file CV editor';
-const CREDIT_HOST = 'github.com/bragisnaer/jobhunt-platform';
-const creditFor = (cv, left, right) => cv.showCredit === false
-  ? null
-  : { left, right, text: (cv.creditText || '').trim() || CREDIT_TEXT_DEFAULT };
+// Optional footer credit line. Off by default — nobody should feel obliged to
+// advertise the tool. When on, the whole line is free text (cv.creditText),
+// including any link; the default below is only a starting suggestion.
+const CREDIT_TEXT_DEFAULT = 'Built and typeset in JobHunt Platform, a single-file CV editor · github.com/bragisnaer/jobhunt-platform';
+// Anything domain-shaped in the line becomes a real anchor, so a URL the user
+// typed stays clickable in the exported PDF. Non-global on purpose: String.split
+// splits on every match regardless, and .test() on a /g regex is stateful.
+const CREDIT_LINK_RE = /((?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s]*)?)/i;
+const creditFor = (cv, left, right) => cv.showCredit
+  ? { left, right, text: (cv.creditText || '').trim() || CREDIT_TEXT_DEFAULT }
+  : null;
 
 const COLOR_SCHEMES = [
   { id: 'ink',    name: 'Navy ink',     ink: '#1a2a3a', side: '#f4efe6' },
@@ -2129,8 +2132,13 @@ function PageCredit({ left = 0, right = 0, text = CREDIT_TEXT_DEFAULT }) {
       letterSpacing: 0.2, lineHeight: 1.4, color: '#a9a49a',
       pointerEvents: 'none',
     }}>
-      {text} · <a href={`https://${CREDIT_HOST}`} target="_blank" rel="noopener noreferrer"
-        style={{ color: 'inherit', textDecoration: 'none', pointerEvents: 'auto' }}>{CREDIT_HOST}</a>
+      {String(text).split(CREDIT_LINK_RE).map((part, i) => (
+        CREDIT_LINK_RE.test(part)
+          ? <a key={i} href={/^https?:\/\//i.test(part) ? part : `https://${part}`}
+              target="_blank" rel="noopener noreferrer"
+              style={{ color: 'inherit', textDecoration: 'none', pointerEvents: 'auto' }}>{part}</a>
+          : part
+      ))}
     </div>
   );
 }
@@ -3761,12 +3769,12 @@ function TweaksPanel({ editOn, cv, update, headshotSrc }) {
 
       <div className="group">
         <h4>Footer credit</h4>
-        <div className="row" title="A small grey line at the bottom of every CV page.">
-          <input type="checkbox" checked={cv.showCredit !== false}
+        <div className="row" title="A small grey line at the bottom of every CV page. Off by default.">
+          <input type="checkbox" checked={!!cv.showCredit}
             onChange={(e) => update(['showCredit'], e.target.checked)} />
           <span style={{ fontSize: 11, lineHeight: 1.45, opacity: 0.85 }}>Show footer credit</span>
         </div>
-        {cv.showCredit !== false && (
+        {!!cv.showCredit && (
           <>
             <div className="row">
               <input type="text" value={cv.creditText || ''}
@@ -3774,7 +3782,8 @@ function TweaksPanel({ editOn, cv, update, headshotSrc }) {
                 onChange={(e) => update(['creditText'], e.target.value)} />
             </div>
             <div style={{ fontSize: 10, lineHeight: 1.45, opacity: 0.6, paddingTop: 2 }}>
-              Leave blank for the default. The {CREDIT_HOST} link is always shown.
+              Write whatever you like, or leave blank for the suggested line.
+              Anything that looks like a web address becomes a clickable link in the PDF.
             </div>
           </>
         )}
