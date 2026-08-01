@@ -345,25 +345,36 @@
   }
   .tweaks-head-actions button:hover { opacity: 1; background: #2a2520; }
   .tweaks-body { padding: 6px 8px 8px; overflow-y: auto; }
-  /* Accordion groups inside the inspector */
+  /* Accordion groups inside the inspector. Every header gets a visible row
+     background — transparent headers read as floating text, and closed
+     groups became nearly invisible against the panel. */
   .acc { border-radius: 8px; }
-  .acc + .acc { margin-top: 2px; }
+  .acc + .acc { margin-top: 4px; }
   .acc-head {
     width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    background: transparent; border: none; color: rgba(255, 255, 255, 0.82);
-    font: inherit; font-size: 11px; font-weight: 600;
+    background: #1f2024; border: 1px solid rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.92);
+    font: inherit; font-size: 11.5px; font-weight: 600;
     letter-spacing: 0.8px; text-transform: uppercase;
-    padding: 8px 6px; cursor: pointer; border-radius: 8px;
+    padding: 9px 10px; cursor: pointer; border-radius: 8px;
     text-align: left;
   }
-  .acc-head:hover { background: #22232680; color: #fff; }
-  .acc-head .marker { font-size: 10px; opacity: 0.5; transition: transform 120ms; }
-  .acc.open > .acc-head .marker { transform: rotate(90deg); }
-  .acc-note {
-    margin-left: 6px; font-weight: 400; text-transform: none; letter-spacing: 0.2px;
-    opacity: 0.55; font-size: 10.5px;
+  .acc-head:hover { background: #26272c; color: #fff; }
+  /* Open group: warm accent on the border so the active tab is findable at a glance */
+  .acc.open > .acc-head {
+    background: #26272c; color: #fff;
+    border-color: rgba(201, 100, 66, 0.45);
+    border-radius: 8px 8px 0 0;
   }
-  .acc-body { padding: 2px 6px 12px; }
+  .acc-head .marker { font-size: 10px; opacity: 0.7; transition: transform 120ms; }
+  .acc.open > .acc-head .marker { transform: rotate(90deg); }
+  /* The note is a value (current template, section count) — give it the warm
+     tone used for active states instead of dimming it to near-invisibility. */
+  .acc-note {
+    margin-left: 6px; font-weight: 500; text-transform: none; letter-spacing: 0.2px;
+    color: #cf9f83; font-size: 10.5px;
+  }
+  .acc-body { padding: 8px 8px 12px; }
   /* Template options as a flat list inside the inspector */
   .tmpl-opt {
     width: 100%; display: flex; align-items: center; gap: 10px;
