@@ -334,7 +334,14 @@
   /* Sync banner under toolbar */
   .sync-banner {
     position: fixed; top: 92px; left: 50%; transform: translateX(-50%);
-    z-index: 998; max-width: calc(100vw - 32px);
+    z-index: 998;
+    /* Capped to the document's width so it stays clear of the side panels,
+       which sit in the gutters at the same height. Wraps to two lines when
+       the document is narrow rather than sliding underneath them. */
+    max-width: min(calc(100vw - 32px), var(--doc-w, 640px));
+    /* border-box so the cap covers padding and border too; otherwise the
+       banner overshoots the document by 30px and eats the panel clearance. */
+    box-sizing: border-box;
     background: #fff; color: #2a2a26;
     border: 1px solid #e2ddd2; border-radius: 10px;
     box-shadow: 0 6px 18px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.06);
@@ -400,7 +407,12 @@
   .tweaks-panel .swatch .side { position: absolute; inset: 50% 0 0 0; }
   .tweaks-panel button { background: #2a2520; color: #fff; border: 1px solid #3a342d; padding: 5px 9px; border-radius: 4px; font: inherit; font-size: 11px; cursor: pointer; }
   .tweaks-panel button:hover { background: #3a342d; }
-  .tweaks-panel .reorder { display: inline-flex; gap: 2px; }
+  /* Fixed width sized for the full set of four actions, so rows with fewer
+     buttons still line their text inputs up with the rest. */
+  .tweaks-panel .reorder {
+    display: inline-flex; gap: 2px; justify-content: flex-end;
+    min-width: 100px; flex-shrink: 0;
+  }
   .tweaks-panel .reorder button { padding: 0 6px; }
 
   /* Headshot editor */
@@ -4570,6 +4582,9 @@ function App() {
         `${Math.round(Math.max(EDGE, r.left - HS_W - GAP))}px`);
       root.style.setProperty('--tw-left',
         `${Math.round(Math.min(usable - TW_W - EDGE, r.right + GAP))}px`);
+      // Anything centred over the document (the sync banner) caps its width
+      // here, so it cannot spill into the gutters and collide with a panel.
+      root.style.setProperty('--doc-w', `${Math.round(r.width)}px`);
     };
     setEdges();
     window.addEventListener('resize', setEdges);
