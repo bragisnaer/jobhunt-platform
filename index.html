@@ -2898,15 +2898,33 @@ const lineCtrlBtn = {
   fontFamily: V1_MONO, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
 };
 
-function CoverLetterDocument({ cv, update }) {
+// ── Letter geometry ─────────────────────────────────────────────
+// The letter used to be one <CVPage>, and a <CVPage> is overflow:hidden — so
+// anything past the fold was thrown away on screen and in the printed PDF with
+// nothing to show for it. These are the numbers the layout always used, pulled
+// out because the pagination budget below has to agree with them exactly.
+const LETTER_BAND_W = 32;
+const LETTER_PAD_TOP = 60, LETTER_PAD_X = 64, LETTER_PAD_BOTTOM = 56;
+const LETTER_COL_W = A4_W - LETTER_BAND_W - LETTER_PAD_X * 2;
+const LETTER_PAGE_H = A4_H - LETTER_PAD_TOP - LETTER_PAD_BOTTOM;
+// The 14px the body and the signoff have always carried as marginTop.
+const LETTER_BLOCK_GAP = 14;
+const LETTER_BODY_STYLE = {
+  fontSize: 11, lineHeight: 1.65,
+  color: V1_INK_SOFT, letterSpacing: -0.01,
+  whiteSpace: 'pre-wrap', textWrap: 'pretty',
+};
+
+// Head and signoff are components rather than inline JSX because the hidden
+// measurement copy renders the very same markup the visible page does. Had
+// they been duplicated, a style tweak landing in only one of the two copies
+// would mis-paginate the letter in a way nothing on screen would explain.
+function LetterHead({ cv, update, ink }) {
   const editable = !!window.__EDIT_ON;
-  const ink = (cv.theme && cv.theme.ink) || '#1a2a3a';
-  const side = (cv.theme && cv.theme.side) || '#f4efe6';
   const cl = cv.coverLetter || {};
   const recipient = cl.recipient || {};
-  const setRecipient = (key, val) => update(['coverLetter', 'recipient', key], val);
   const setCl = (key, val) => update(['coverLetter', key], val);
-  const dateValue = cl.date || todayFormatted();
+  const setRecipient = (key, val) => update(['coverLetter', 'recipient', key], val);
 
   const lines = getSenderLines(cv);
   const setLines = (next) => update(['coverLetter', 'sender', 'lines'], next);
@@ -2921,120 +2939,249 @@ function CoverLetterDocument({ cv, update }) {
   };
   const addLine = () => setLines([...lines, { id: `custom_${Date.now()}`, value: '' }]);
 
-  const nameLine = lines.find(l => l.id === 'name');
-  const signNameValue = cl.signName || (nameLine && nameLine.value) || '';
-
   const lineStyle = (id) => id === 'name'
     ? { fontFamily: V1_FONT, fontSize: 22, fontWeight: 600, letterSpacing: -0.4, color: ink, marginBottom: 6, lineHeight: 1.1 }
     : { color: V1_MUTED };
 
+  // Flex column here as well as on the page, so the measured height is the
+  // rendered height: in plain block flow these children's top margins would
+  // collapse differently and the budget would be off by tens of pixels.
   return (
-    <CVPage>
-      <div style={{ display: 'flex', height: '100%' }}>
-        <div style={{ width: 32, background: side, flexShrink: 0 }} aria-hidden />
-        <div style={{
-          flex: 1, padding: '60px 64px 56px', fontFamily: V1_FONT, color: V1_INK_SOFT,
-          display: 'flex', flexDirection: 'column', boxSizing: 'border-box',
-        }}>
-          {/* Sender block — top right */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }} title="Sender lines — add/remove/reorder freely.">
-            <div style={{ textAlign: 'right', fontSize: 10.5, lineHeight: 1.55, color: V1_INK_SOFT, minWidth: 200 }}>
-              {lines.map((l, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
-                  {editable && (
-                    <span className="screen-only" style={{ display: 'inline-flex', gap: 2, opacity: 0.6 }}>
-                      <button onClick={() => moveLine(i, -1)} disabled={i === 0} title="Up"
-                        style={lineCtrlBtn}>↑</button>
-                      <button onClick={() => moveLine(i, 1)} disabled={i === lines.length - 1} title="Down"
-                        style={lineCtrlBtn}>↓</button>
-                      <button onClick={() => removeLine(i)} title="Remove line"
-                        style={{ ...lineCtrlBtn, color: '#c96442' }}>×</button>
-                    </span>
-                  )}
-                  {/* A sender line is deliberately a contact value, so any TLD
-                      links — no strict prose rules here. */}
-                  <Ed tag="div"
-                    value={l.value}
-                    onChange={(v) => editLine(i, v)}
-                    linkify={l.id !== 'name'} strictLinks={false}
-                    style={lineStyle(l.id)} />
-                </div>
-              ))}
+    <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+      {/* Sender block — top right */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }} title="Sender lines — add/remove/reorder freely.">
+        <div style={{ textAlign: 'right', fontSize: 10.5, lineHeight: 1.55, color: V1_INK_SOFT, minWidth: 200 }}>
+          {lines.map((l, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
               {editable && (
-                <button type="button" className="add-link screen-only"
-                  onClick={addLine}
-                  style={{ marginTop: 4, background: 'transparent', border: 'none', fontSize: 9, color: '#999', cursor: 'pointer', padding: '2px 0' }}>
-                  + add line
-                </button>
+                <span className="screen-only" style={{ display: 'inline-flex', gap: 2, opacity: 0.6 }}>
+                  <button onClick={() => moveLine(i, -1)} disabled={i === 0} title="Up"
+                    style={lineCtrlBtn}>↑</button>
+                  <button onClick={() => moveLine(i, 1)} disabled={i === lines.length - 1} title="Down"
+                    style={lineCtrlBtn}>↓</button>
+                  <button onClick={() => removeLine(i)} title="Remove line"
+                    style={{ ...lineCtrlBtn, color: '#c96442' }}>×</button>
+                </span>
               )}
+              {/* A sender line is deliberately a contact value, so any TLD
+                  links — no strict prose rules here. */}
+              <Ed tag="div"
+                value={l.value}
+                onChange={(v) => editLine(i, v)}
+                linkify={l.id !== 'name'} strictLinks={false}
+                style={lineStyle(l.id)} />
             </div>
-          </div>
-
-          {/* Date — right-aligned, below sender */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
-            <Ed tag="div"
-              value={dateValue}
-              onChange={(v) => setCl('date', v)}
-              style={{ fontSize: 10.5, color: V1_MUTED, fontFamily: V1_MONO, letterSpacing: 0.2 }} />
-          </div>
-
-          {/* Recipient block */}
-          <div style={{ marginTop: 36, fontSize: 10.5, lineHeight: 1.55 }}>
-            <Ed tag="div" value={recipient.name || ''} onChange={(v) => setRecipient('name', v)}
-              placeholder="Recipient name"
-              style={{ fontWeight: 600, color: ink, fontSize: 11.5 }} />
-            <Ed tag="div" value={recipient.title || ''} onChange={(v) => setRecipient('title', v)}
-              placeholder="Recipient title"
-              style={{ color: V1_INK_SOFT }} />
-            <Ed tag="div" value={recipient.company || ''} onChange={(v) => setRecipient('company', v)}
-              placeholder="Company name"
-              style={{ color: V1_INK_SOFT }} />
-            <Ed tag="div" value={recipient.address || ''} onChange={(v) => setRecipient('address', v)}
-              placeholder="Company address"
-              style={{ color: V1_MUTED }} />
-          </div>
-
-          {/* Subject */}
-          <Ed tag="div"
-            value={cl.subject || ''}
-            onChange={(v) => setCl('subject', v)}
-            placeholder="Subject — e.g. Application for [role] at [company]"
-            style={{
-              marginTop: 28, fontSize: 12, fontWeight: 600, color: ink,
-              letterSpacing: -0.05, textTransform: 'none',
-            }} />
-
-          {/* Salutation */}
-          <Ed tag="div"
-            value={cl.salutation || ''}
-            onChange={(v) => setCl('salutation', v)}
-            style={{ marginTop: 22, fontSize: 11, color: V1_INK_SOFT }} />
-
-          {/* Body */}
-          <Ed tag="div"
-            value={cl.body || ''}
-            onChange={(v) => setCl('body', v)}
-            multiline linkify
-            style={{
-              marginTop: 14, fontSize: 11, lineHeight: 1.65,
-              color: V1_INK_SOFT, letterSpacing: -0.01,
-              whiteSpace: 'pre-wrap', textWrap: 'pretty',
-            }} />
-
-          {/* Signoff */}
-          <div style={{ marginTop: 14 }}>
-            <Ed tag="div"
-              value={cl.signoff || ''}
-              onChange={(v) => setCl('signoff', v)}
-              style={{ fontSize: 11, color: V1_INK_SOFT }} />
-            <Ed tag="div"
-              value={signNameValue}
-              onChange={(v) => setCl('signName', v)}
-              style={{ marginTop: 18, fontSize: 11, fontWeight: 600, color: ink }} />
-          </div>
+          ))}
+          {editable && (
+            <button type="button" className="add-link screen-only"
+              onClick={addLine}
+              style={{ marginTop: 4, background: 'transparent', border: 'none', fontSize: 9, color: '#999', cursor: 'pointer', padding: '2px 0' }}>
+              + add line
+            </button>
+          )}
         </div>
       </div>
-    </CVPage>
+
+      {/* Date — right-aligned, below sender */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
+        <Ed tag="div"
+          value={cl.date || todayFormatted()}
+          onChange={(v) => setCl('date', v)}
+          style={{ fontSize: 10.5, color: V1_MUTED, fontFamily: V1_MONO, letterSpacing: 0.2 }} />
+      </div>
+
+      {/* Recipient block */}
+      <div style={{ marginTop: 36, fontSize: 10.5, lineHeight: 1.55 }}>
+        <Ed tag="div" value={recipient.name || ''} onChange={(v) => setRecipient('name', v)}
+          placeholder="Recipient name"
+          style={{ fontWeight: 600, color: ink, fontSize: 11.5 }} />
+        <Ed tag="div" value={recipient.title || ''} onChange={(v) => setRecipient('title', v)}
+          placeholder="Recipient title"
+          style={{ color: V1_INK_SOFT }} />
+        <Ed tag="div" value={recipient.company || ''} onChange={(v) => setRecipient('company', v)}
+          placeholder="Company name"
+          style={{ color: V1_INK_SOFT }} />
+        <Ed tag="div" value={recipient.address || ''} onChange={(v) => setRecipient('address', v)}
+          placeholder="Company address"
+          style={{ color: V1_MUTED }} />
+      </div>
+
+      {/* Subject */}
+      <Ed tag="div"
+        value={cl.subject || ''}
+        onChange={(v) => setCl('subject', v)}
+        placeholder="Subject — e.g. Application for [role] at [company]"
+        style={{
+          marginTop: 28, fontSize: 12, fontWeight: 600, color: ink,
+          letterSpacing: -0.05, textTransform: 'none',
+        }} />
+
+      {/* Salutation */}
+      <Ed tag="div"
+        value={cl.salutation || ''}
+        onChange={(v) => setCl('salutation', v)}
+        style={{ marginTop: 22, fontSize: 11, color: V1_INK_SOFT }} />
+    </div>
+  );
+}
+
+function LetterSignoff({ cv, update, ink }) {
+  const cl = cv.coverLetter || {};
+  const nameLine = getSenderLines(cv).find(l => l.id === 'name');
+  return (
+    <div>
+      <Ed tag="div"
+        value={cl.signoff || ''}
+        onChange={(v) => update(['coverLetter', 'signoff'], v)}
+        style={{ fontSize: 11, color: V1_INK_SOFT }} />
+      <Ed tag="div"
+        value={cl.signName || (nameLine && nameLine.value) || ''}
+        onChange={(v) => update(['coverLetter', 'signName'], v)}
+        style={{ marginTop: 18, fontSize: 11, fontWeight: 600, color: ink }} />
+    </div>
+  );
+}
+
+function CoverLetterDocument({ cv, update }) {
+  const ink = (cv.theme && cv.theme.ink) || '#1a2a3a';
+  const side = (cv.theme && cv.theme.side) || '#f4efe6';
+  const cl = cv.coverLetter || {};
+  const setCl = (key, val) => update(['coverLetter', key], val);
+
+  // One atom per `\n`-separated paragraph. The newline between two paragraphs
+  // is a separator, not a line of its own, so the paragraphs' measured heights
+  // add up to exactly the height of the joined text — no fudge factor needed
+  // to rejoin them, which is what makes the budget below trustworthy.
+  const paras = (cl.body || '').split('\n');
+
+  // ── Measure & paginate ──────────────────────────────────────
+  // Same shape as LinearTemplate: every atom is measured in a hidden copy at
+  // the real column width, then packed into pages against the budget. `lead`
+  // is height that only exists when something is already on the page above —
+  // here, the 14px the body and the signoff sit below whatever precedes them.
+  const atoms = [
+    { key: 'head', lead: 0 },
+    ...paras.map((p, i) => ({ key: `b-${i}`, lead: i === 0 ? LETTER_BLOCK_GAP : 0, blank: p.trim() === '' })),
+    { key: 'sign', lead: LETTER_BLOCK_GAP },
+  ];
+  const measureRefs = React.useRef({});
+  const [pages, setPages] = React.useState(() => [atoms.map(a => a.key)]);
+
+  React.useLayoutEffect(() => {
+    const groups = [[]];
+    let usedH = 0;
+    for (const a of atoms) {
+      const el = measureRefs.current[a.key];
+      const h = el ? el.offsetHeight : 0;
+      const last = groups[groups.length - 1];
+      const overflows = last.length > 0 && usedH + a.lead + h > LETTER_PAGE_H;
+      // An atom taller than a whole page gets a page of its own rather than an
+      // endless run of them; only its own tail is lost, and only if someone
+      // writes a single unbroken paragraph longer than A4.
+      if (overflows && !a.blank) {
+        groups.push([a.key]);
+        usedH = h;
+      } else {
+        last.push(a.key);
+        // A blank line that would otherwise open the next page falls off the
+        // bottom of this one instead — it has nothing in it to lose, and the
+        // paragraph after it then starts page two flush with the top margin
+        // rather than under a gap the writer never put there.
+        usedH = overflows ? LETTER_PAGE_H : usedH + (last.length > 1 ? a.lead : 0) + h;
+      }
+    }
+    const flat = (g) => g.map(p => p.join('|')).join('||');
+    if (flat(groups) !== flat(pages)) setPages(groups);
+  });
+
+  // Every page renders one contiguous slice of the same string, and an edit
+  // splices its slice back into the whole. cl.body stays a single field on
+  // disk with its shape untouched, and a paragraph added on page 2 pushes the
+  // rest along exactly as it would have in one field.
+  const replaceSlice = (from, to, text) =>
+    setCl('body', [...paras.slice(0, from), ...text.split('\n'), ...paras.slice(to)].join('\n'));
+
+  // Inset past the 32px band so the credit sits centred under the text column.
+  const credit = creditFor(cv, LETTER_BAND_W, 0);
+
+  return (
+    <>
+      {/* Hidden measurement copy — same width and font as the visible column.
+          `update` is stubbed out: nothing here can be reached (visibility:
+          hidden takes it out of the tab order too), and a stub says so. */}
+      <div className="screen-only" aria-hidden style={{
+        position: 'absolute', left: -9999, top: 0,
+        width: LETTER_COL_W,
+        visibility: 'hidden', pointerEvents: 'none',
+        fontFamily: V1_FONT, color: V1_INK_SOFT,
+      }}>
+        <div ref={el => { measureRefs.current['head'] = el; }}>
+          <LetterHead cv={cv} update={() => {}} ink={ink} />
+        </div>
+        {paras.map((p, i) => (
+          // A blank line still takes up a line inside the body's pre-wrap
+          // text, but an empty element measures as zero — hence the no-break
+          // space standing in for it here.
+          <div key={i} ref={el => { measureRefs.current[`b-${i}`] = el; }} style={LETTER_BODY_STYLE}>
+            {p || ' '}
+          </div>
+        ))}
+        <div ref={el => { measureRefs.current['sign'] = el; }}>
+          <LetterSignoff cv={cv} update={() => {}} ink={ink} />
+        </div>
+      </div>
+
+      {pages.map((pageKeys, pi) => {
+        const hasHead = pageKeys.includes('head');
+        const hasSign = pageKeys.includes('sign');
+        // Stale keys survive for the one paint between the body shrinking and
+        // the layout effect repaginating, so drop anything out of range.
+        const onPage = pageKeys
+          .filter(k => k.startsWith('b-'))
+          .map(k => Number(k.slice(2)))
+          .filter(i => i < paras.length);
+        const from = onPage.length ? onPage[0] : 0;
+        const to = onPage.length ? onPage[onPage.length - 1] + 1 : 0;
+        return (
+          <React.Fragment key={pi}>
+            {pi > 0 && <PageBreakMarker index={pi - 1} />}
+            <CVPage credit={credit}>
+              <div style={{ display: 'flex', height: '100%' }}>
+                <div style={{ width: LETTER_BAND_W, background: side, flexShrink: 0 }} aria-hidden />
+                {/* Every child is flexShrink: 0. offsetHeight rounds to whole
+                    pixels, so a packed page can land a few pixels over budget;
+                    left to shrink, the column would quietly squeeze the body
+                    and slide the signoff up over it. Held at their natural
+                    heights they spill into the bottom padding instead, where
+                    there is room and nothing to collide with. */}
+                <div style={{
+                  flex: 1, padding: `${LETTER_PAD_TOP}px ${LETTER_PAD_X}px ${LETTER_PAD_BOTTOM}px`,
+                  fontFamily: V1_FONT, color: V1_INK_SOFT,
+                  display: 'flex', flexDirection: 'column', boxSizing: 'border-box',
+                }}>
+                  {hasHead && <LetterHead cv={cv} update={update} ink={ink} />}
+                  {onPage.length > 0 && (
+                    // Ed commits on blur, so the letter never repaginates
+                    // mid-keystroke — the page only reflows once the caret has
+                    // left, which is what keeps the caret where the user put it.
+                    <Ed tag="div"
+                      value={paras.slice(from, to).join('\n')}
+                      onChange={(v) => replaceSlice(from, to, v)}
+                      multiline linkify
+                      style={{ ...LETTER_BODY_STYLE, flexShrink: 0, marginTop: hasHead ? LETTER_BLOCK_GAP : 0 }} />
+                  )}
+                  {hasSign && (
+                    <div style={{ flexShrink: 0, marginTop: (hasHead || onPage.length) ? LETTER_BLOCK_GAP : 0 }}>
+                      <LetterSignoff cv={cv} update={update} ink={ink} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CVPage>
+          </React.Fragment>
+        );
+      })}
+    </>
   );
 }
 
