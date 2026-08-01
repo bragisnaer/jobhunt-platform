@@ -354,11 +354,12 @@
     .sync-banner { display: none !important; }
   }
 
-  /* Tweaks panel (bottom-right by default, draggable) */
+  /* Tweaks panel. Mirrors .hs-controls into the gutter right of the document. */
   .tweaks-panel {
-    position: fixed; bottom: 16px; right: 16px; z-index: 1000;
+    position: fixed; z-index: 1000;
+    top: 96px; left: var(--tw-left, auto); right: auto;
     background: #17181a; color: #fff; border-radius: 10px;
-    font-size: 12px; width: 280px; max-height: 80vh;
+    font-size: 12px; width: 280px; max-height: calc(100vh - 112px);
     box-shadow: 0 6px 24px rgba(0,0,0,.25);
     display: flex; flex-direction: column; overflow: hidden;
   }
@@ -407,15 +408,17 @@
     background: #c96442; border: 2px solid #fff; border-radius: 50%;
     cursor: nwse-resize; z-index: 5;
   }
-  /* Floating headshot controls (bottom-left by default, draggable).
-     Mirrors .tweaks-panel, which sits in the opposite corner. */
+  /* Floating headshot controls. Defaults to the gutter left of the document;
+     --doc-left is published by the app and tracks zoom. max() keeps it on
+     screen when the window is too narrow for a gutter that wide. */
   .hs-controls {
-    position: fixed; bottom: 16px; left: 16px; z-index: 1000;
+    position: fixed; z-index: 1000;
+    top: 96px; left: var(--hs-left, 8px);
     background: #17181a; color: #fff;
     border-radius: 10px;
     box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
     font-family: 'Inter Tight', sans-serif; font-size: 11px;
-    width: 232px; max-height: 80vh;
+    width: 232px; max-height: calc(100vh - 112px);
     display: flex; flex-direction: column; overflow: hidden;
     animation: hs-controls-in 140ms ease-out;
   }
@@ -4532,6 +4535,35 @@ function App() {
     return (v === 'letter' || v === 'applications') ? v : 'cv';
   });
   const setDoc = (v) => { setDocState(v); try { localStorage.setItem('cv-active-doc', v); } catch {} };
+
+  // Both floating panels default to flanking the document. Their final left
+  // offsets are computed here and published as CSS variables, so the panels
+  // stay pure CSS until dragged and there is one place that knows the maths.
+  //
+  // Everything is expressed as `left`, in getBoundingClientRect coordinates.
+  // Using `right` instead would mean mixing in the viewport width, and
+  // `scrollbar-gutter: stable` on <html> makes that ambiguous: clientWidth
+  // reports the full width while a fixed element's box excludes the reserved
+  // gutter, which put the right-hand panel a gutter's width out of place.
+  React.useLayoutEffect(() => {
+    const root = document.documentElement;
+    const setEdges = () => {
+      const page = document.querySelector('.cv-page');
+      if (!page) return;
+      const r = page.getBoundingClientRect();
+      // The stage centres the page, so left + right spans the usable width,
+      // excluding any reserved scrollbar gutter.
+      const usable = r.left + r.right;
+      const GAP = 16, EDGE = 8, HS_W = 232, TW_W = 280;
+      root.style.setProperty('--hs-left',
+        `${Math.round(Math.max(EDGE, r.left - HS_W - GAP))}px`);
+      root.style.setProperty('--tw-left',
+        `${Math.round(Math.min(usable - TW_W - EDGE, r.right + GAP))}px`);
+    };
+    setEdges();
+    window.addEventListener('resize', setEdges);
+    return () => window.removeEventListener('resize', setEdges);
+  }, [zoom, doc]);
 
   const [viewingSnapshot, setViewingSnapshot] = React.useState(null);
   const editPriorRef = React.useRef(null);
