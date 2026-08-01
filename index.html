@@ -1134,6 +1134,25 @@ function sectionDisplayTitle(id, cv) {
   const meta = (cv.sidebar || []).find(s => s.id === id);
   return meta ? meta.title : id;
 }
+// A sidebar entry's content lives at exactly one cv key: its explicit dataKey
+// when it has one, otherwise its kind, otherwise its id. That fallback chain is
+// renderSidebarSection's, and the two must never drift apart — this function is
+// used to decide whether a blob is still reachable, so guessing wrong here
+// means either deleting live content or leaking dead content.
+function sidebarDataKey(meta) {
+  return meta && (meta.dataKey || meta.kind || meta.id);
+}
+// Whether cv[key] can be thrown away once the section that owned it is deleted.
+// Main sections render straight off cv and never consult the sidebar, so their
+// keys are never reclaimable no matter what a sidebar entry claims. Past that,
+// the key must be one no *surviving* sidebar entry resolves to. duplicateSection
+// never hands the same key out twice, but an imported or hand-edited blob can,
+// and silently eating a live section's content is far worse than leaking a few
+// kilobytes.
+function canReclaimDataKey(key, remainingSidebar) {
+  if (!key || isMainSectionId(key)) return false;
+  return !(remainingSidebar || []).some(s => sidebarDataKey(s) === key);
+}
 
 // Custom statuses (user-defined, stored in localStorage)
 const CUSTOM_STATUSES_KEY = 'cv-custom-statuses';
@@ -1226,6 +1245,29 @@ function setPath(obj, path, value) {
     cur = cur[k];
   }
   cur[path[path.length - 1]] = value;
+  return root;
+}
+
+// setPath's counterpart, and the reason deleting a section can actually reclaim
+// its storage. setPath(cv, ['x'], undefined) leaves 'x' sitting in the object
+// holding undefined: it vanishes from localStorage only because JSON.stringify
+// happens to drop undefined values, which is an accident of the serialiser, not
+// a delete — `'x' in cv`, Object.keys and deepMerge all still see the key.
+// deletePath unsets it for real, and returns the object untouched when there
+// was nothing to remove so a no-op never spuriously triggers a save.
+function deletePath(obj, path) {
+  const root = Array.isArray(obj) ? obj.slice() : { ...obj };
+  let cur = root;
+  for (let i = 0; i < path.length - 1; i++) {
+    const k = path[i];
+    const child = cur[k];
+    if (child == null || typeof child !== 'object') return obj;
+    cur[k] = Array.isArray(child) ? child.slice() : { ...child };
+    cur = cur[k];
+  }
+  const last = path[path.length - 1];
+  if (!(last in cur)) return obj;
+  delete cur[last];
   return root;
 }
 
@@ -3595,7 +3637,7 @@ function InspectorGroup({ id, title, note, open, onToggle, children }) {
   );
 }
 
-function TweaksPanel({ editOn, cv, update, headshotSrc,
+function TweaksPanel({ editOn, cv, update, removePath, headshotSrc,
                       templateId, onTemplateChange, hsFocusTick = 0, onHsSlotRef }) {
   // Every hook precedes the visibility returns. The old version returned null
   // above its useState calls, so toggling Edit changed the hook count between
@@ -3713,10 +3755,25 @@ function TweaksPanel({ editOn, cv, update, headshotSrc,
     if (isMainSectionId(sec.id)) return;
     const meta = sidebarMetaById[sec.id];
     if (!meta || !meta.dataKey) return; // only allow deleting duplicates (those with explicit dataKey)
-    if (!confirm(`Delete section "${sectionDisplayTitle(sec.id, cv)}"?`)) return;
+    // The prompt says "and everything in it" because that is now literally true:
+    // the section's content is destroyed with it, not just hidden.
+    if (!confirm(`Delete section "${sectionDisplayTitle(sec.id, cv)}" and everything in it?`)) return;
+    const nextSidebar = sidebar.filter(s => s.id !== sec.id);
     setOrder(order.filter((_, idx) => idx !== i));
-    update(['sidebar'], sidebar.filter(s => s.id !== sec.id));
-    // Note: leaves cv[meta.dataKey] orphaned; harmless, no UI references it.
+    update(['sidebar'], nextSidebar);
+    // Reclaim the blob the section owned. This used to be written off as a
+    // harmless orphan because no UI reads it, which is true on screen and false
+    // over time: an orphan is copied verbatim into every JSON backup, every
+    // folder-sync write and every application fork, so a user who duplicates and
+    // deletes sections a few times carries dead copies of their old content
+    // around forever with nothing to ever reclaim them. canReclaimDataKey is
+    // what makes this safe to do — see it for the cases it refuses. The two seed
+    // sections that carry a dataKey (techTools, residence) are a partial
+    // exception: deleting them drops the key, but the deepMerge against SEED_CV
+    // on the next load puts it back. That is bounded and invisible, and the
+    // unbounded case this fixes is duplicates, whose `<key>_<n>` names SEED_CV
+    // has no opinion about.
+    if (canReclaimDataKey(meta.dataKey, nextSidebar)) removePath([meta.dataKey]);
   };
   const visibleSections = order.filter(s =>
     s.visible && (isMainSectionId(s.id) || sidebarMetaById[s.id])).length;
@@ -4576,6 +4633,12 @@ function App() {
   const update = React.useCallback((path, value) => {
     setCv(prev => setPath(prev, path, value));
   }, []);
+  // update() can only ever write; this is how a caller unsets a key for real.
+  // Both go through setCv, so a removal is picked up by the debounced persist
+  // effect above exactly like any other edit and survives a reload.
+  const removePath = React.useCallback((path) => {
+    setCv(prev => deletePath(prev, path));
+  }, []);
 
   // Headshot (IDB per active app)
   const [headshotSrc, setHeadshotSrc] = React.useState(null);
@@ -5048,7 +5111,7 @@ function App() {
         {mainContent}
       </div>
       {doc === 'cv' && !viewingSnapshot && (
-        <TweaksPanel editOn={editOn} cv={cv} update={update} headshotSrc={headshotSrc}
+        <TweaksPanel editOn={editOn} cv={cv} update={update} removePath={removePath} headshotSrc={headshotSrc}
           templateId={resolveTemplateId(cv.templateId)}
           onTemplateChange={(id) => update(['templateId'], id)}
           hsFocusTick={hsFocusTick} onHsSlotRef={setHsSlot} />
