@@ -407,22 +407,24 @@
     background: #c96442; border: 2px solid #fff; border-radius: 50%;
     cursor: nwse-resize; z-index: 5;
   }
-  /* Floating headshot controls panel (anchored next to the headshot frame) */
+  /* Floating headshot controls (bottom-left by default, draggable).
+     Mirrors .tweaks-panel, which sits in the opposite corner. */
   .hs-controls {
-    position: absolute; z-index: 950;
+    position: fixed; bottom: 16px; left: 16px; z-index: 1000;
     background: #17181a; color: #fff;
     border-radius: 10px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.18);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
     font-family: 'Inter Tight', sans-serif; font-size: 11px;
-    overflow: hidden;
+    width: 232px; max-height: 80vh;
+    display: flex; flex-direction: column; overflow: hidden;
     animation: hs-controls-in 140ms ease-out;
   }
   @keyframes hs-controls-in {
-    from { opacity: 0; transform: translateX(4px); }
-    to   { opacity: 1; transform: translateX(0); }
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
   .hs-controls-head {
-    padding: 8px 8px 8px 12px; border-bottom: 1px solid #2a2520;
+    padding: 8px 8px 8px 12px; border-bottom: 1px solid #2a2520; flex-shrink: 0;
     background: #1c1d20;
     font-size: 9.5px; letter-spacing: 1.4px; text-transform: uppercase;
     color: rgba(255, 255, 255, 0.55); font-weight: 600;
@@ -430,7 +432,6 @@
     cursor: grab; user-select: none;
   }
   .hs-controls-head:active { cursor: grabbing; }
-  .hs-controls.dragged { animation: none; }
   .hs-head-actions { display: inline-flex; gap: 2px; }
   .hs-head-actions button {
     background: transparent; border: none; color: #fff; opacity: 0.5;
@@ -449,6 +450,7 @@
   .hs-reopen:hover { background: #222326; }
   .hs-controls-body {
     padding: 12px; display: flex; flex-direction: column; gap: 12px;
+    overflow-y: auto;
   }
   .hs-controls .hs-group { display: flex; flex-direction: column; gap: 5px; }
   .hs-controls .hs-group-label {
@@ -2008,76 +2010,11 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
 
   const justify = align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start';
 
-  // Anchor floating controls outside the CV page, in document coordinates
-  // so the panel scrolls with the page (no per-frame catchup on scroll).
-  const [panelPos, setPanelPos] = React.useState(null);
+  // Same model as the tweaks panel: pinned to a viewport corner by default and
+  // dragged from there. It used to chase the headshot frame in document
+  // coordinates, which needed observers to survive zoom and reflow; now that
+  // the user can put it where they want, none of that is necessary.
   const PANEL_W = 232;
-  React.useLayoutEffect(() => {
-    if (!editable) { setPanelPos(null); return; }
-    let raf = null;
-    const update = () => {
-      if (!frameRef.current) return;
-      const fr = frameRef.current.getBoundingClientRect();
-      const page = frameRef.current.closest('.cv-page');
-      const pr = page ? page.getBoundingClientRect() : fr;
-      const sx = window.scrollX || window.pageXOffset || 0;
-      const sy = window.scrollY || window.pageYOffset || 0;
-      const gap = 16;
-      const margin = 8;
-      // Stay on the same side as the frame, so the panel sits next to the
-      // headshot instead of across the document (frame in the left half →
-      // panel left of the page). Falls through to the other side if no room.
-      const frameOnRightHalf = (fr.left + fr.right) / 2 > (pr.left + pr.right) / 2;
-      const placeLeft = () => pr.left - PANEL_W - gap;
-      const placeRight = () => pr.right + gap;
-      const fitsLeft = (x) => x >= margin;
-      const fitsRight = (x) => x + PANEL_W <= window.innerWidth - margin;
-      let vLeft;
-      if (frameOnRightHalf) {
-        vLeft = placeRight();
-        if (!fitsRight(vLeft)) {
-          const lt = placeLeft();
-          vLeft = fitsLeft(lt) ? lt : Math.max(margin, Math.min(window.innerWidth - PANEL_W - margin, pr.left));
-        }
-      } else {
-        vLeft = placeLeft();
-        if (!fitsLeft(vLeft)) {
-          const rt = placeRight();
-          vLeft = fitsRight(rt) ? rt : Math.max(margin, Math.min(window.innerWidth - PANEL_W - margin, pr.left));
-        }
-      }
-      const vTop = fr.top;
-      // Convert to document coords so absolute positioning scrolls with the page.
-      setPanelPos({ left: vLeft + sx, top: vTop + sy });
-    };
-    const queue = () => {
-      if (raf) cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(update);
-    };
-    update();
-    window.addEventListener('resize', queue);
-    // Zoom is an inline style on .cv-stage, and changing it is not a window
-    // resize, so without these observers the panel kept a stale position until
-    // something else in the dep array changed — which is why toggling Edit
-    // appeared to "fix" it.
-    const stage = frameRef.current && frameRef.current.closest('.cv-stage');
-    const mo = stage ? new MutationObserver(queue) : null;
-    if (mo) mo.observe(stage, { attributes: true, attributeFilter: ['style', 'data-zoom'] });
-    // Catches everything else that moves the frame: fonts loading, sections
-    // reflowing, the sidebar re-splitting across pages.
-    const page = frameRef.current && frameRef.current.closest('.cv-page');
-    const ro = page && window.ResizeObserver ? new ResizeObserver(queue) : null;
-    if (ro) ro.observe(page);
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-      window.removeEventListener('resize', queue);
-      if (mo) mo.disconnect();
-      if (ro) ro.disconnect();
-    };
-  }, [editable, src, t.size, t.align]);
-
-  // Panel window state: hidden until reopened, and free-dragged position.
-  // dragPos !== null means the user placed it, so auto-anchoring stands down.
   const [hsHidden, setHsHidden] = React.useState(() => {
     try { return localStorage.getItem('cv-hs-hidden') === '1'; } catch { return false; }
   });
@@ -2085,27 +2022,31 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
     setHsHidden(hidden);
     try { localStorage.setItem('cv-hs-hidden', hidden ? '1' : '0'); } catch {}
   };
-  // The panel is positioned in document coords, so the drag must be too.
+  const panelRef = React.useRef(null);
   const { dragPos: panelDragPos, setDragPos: setPanelDragPos, onGrab } =
-    usePanelDrag({ width: PANEL_W, docCoords: true });
-  const onPanelDragDown = (e) => onGrab(e, panelDragPos || panelPos);
-
-  const pos = panelDragPos || panelPos;
+    usePanelDrag({ width: PANEL_W });
+  const onPanelDragDown = (e) => {
+    // First grab: still corner-anchored, so read where it actually sits.
+    const r = panelRef.current && panelRef.current.getBoundingClientRect();
+    onGrab(e, panelDragPos || (r ? { left: r.left, top: r.top } : null));
+  };
   const controls = editable && hsHidden ? (
     <button type="button" className="hs-reopen screen-only"
       onClick={() => hidePanel(false)} title="Show headshot controls">
       ◲ Headshot
     </button>
-  ) : editable && pos ? (
-    <div className={`hs-controls screen-only${panelDragPos ? ' dragged' : ''}`}
-      style={{ left: pos.left, top: pos.top, width: PANEL_W }}>
+  ) : editable ? (
+    <div className="hs-controls screen-only" ref={panelRef}
+      style={panelDragPos
+        ? { left: panelDragPos.left, top: panelDragPos.top, right: 'auto', bottom: 'auto' }
+        : undefined}>
       <div className="hs-controls-head" onPointerDown={onPanelDragDown}
         title="Drag to move this panel">
         <span>Headshot</span>
         <span className="hs-head-actions">
           {panelDragPos && (
             <button type="button" onClick={() => setPanelDragPos(null)}
-              title="Snap back next to the headshot">⟲</button>
+              title="Snap back to the corner">⟲</button>
           )}
           <button type="button" onClick={() => hidePanel(true)}
             title="Hide this panel">×</button>
