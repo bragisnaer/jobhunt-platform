@@ -2303,9 +2303,29 @@ function V1Role({ role, onRole, onDelete, last, ink, flowRoleId, companyLocation
   );
 }
 
-function ContactRow({ href, value, onChange }) {
-  if (window.__EDIT_ON) return <Ed tag="div" value={value} onChange={onChange} />;
-  return <div><a href={href} style={{ color: 'inherit', textDecoration: 'none' }}>{value}</a></div>;
+// One contact line — email, phone, LinkedIn — shared by the Editorial sidebar
+// and the Linear header, which had grown two copies of the same anchor.
+// The <a> is deliberately rendered in edit mode as well: printing is a bare
+// window.print() that never forces Edit off, so the old version, which swapped
+// the anchor out for a naked Ed while editing, handed anyone who hit "Save as
+// PDF" with Edit on a PDF whose contact details were dead text.
+// Wrapping a contenteditable in a link is the price of that, and it costs two
+// guards while editing: a plain click would otherwise follow the href mid-word,
+// so we swallow the navigation and leave the mousedown to place the caret, and
+// a live link is draggable by default, which would turn drag-to-select-a-typo
+// into dragging the link somewhere. Neither guard touches the href, which is
+// all the PDF writer reads.
+function ContactRow({ href, value, onChange, external = false }) {
+  return (
+    <a href={href}
+      target={external ? '_blank' : undefined}
+      rel={external ? 'noopener noreferrer' : undefined}
+      draggable={window.__EDIT_ON ? false : undefined}
+      onClick={(e) => { if (window.__EDIT_ON) e.preventDefault(); }}
+      style={{ display: 'block', color: 'inherit', textDecoration: 'none' }}>
+      <Ed tag="div" value={value} onChange={onChange} />
+    </a>
+  );
 }
 function AddRow({ onClick, label }) {
   if (!window.__EDIT_ON) return null;
@@ -2483,7 +2503,7 @@ function V1Sidebar({ cv, update, page, splitIdx, ink, side, headshotSrc, onHeads
           <div style={{ fontSize: 10, lineHeight: 1.65 }}>
             <ContactRow href={`mailto:${cv.contact.email}`} value={cv.contact.email} onChange={(v) => update(['contact', 'email'], v)} />
             <ContactRow href={`tel:${(cv.contact.phone || '').replace(/\s+/g, '')}`} value={cv.contact.phone} onChange={(v) => update(['contact', 'phone'], v)} />
-            <ContactRow href={`https://${(cv.contact.linkedin || '').replace(/^https?:\/\//, '')}`} value={cv.contact.linkedin} onChange={(v) => update(['contact', 'linkedin'], v)} />
+            <ContactRow href={`https://${(cv.contact.linkedin || '').replace(/^https?:\/\//, '')}`} value={cv.contact.linkedin} onChange={(v) => update(['contact', 'linkedin'], v)} external />
             <Ed tag="div" value={cv.contact.location} onChange={(v) => update(['contact', 'location'], v)} style={{ color: V1_MUTED }} />
             <Ed tag="div" value={cv.contact.relocation} onChange={(v) => update(['contact', 'relocation'], v)} style={{ color: V1_MUTED, fontStyle: 'italic' }} />
           </div>
@@ -3147,19 +3167,13 @@ function LinearTemplate({ cv, update, headshotSrc, onHeadshotSrc, onHeadshotTran
             style={{ fontSize: 13, color: V1_MUTED, marginTop: 8, letterSpacing: 0.1, display: 'block', fontWeight: 400 }} />
           <div style={{ marginTop: 14, fontSize: 10.5, lineHeight: 1.5, color: V1_INK_SOFT, display: 'flex', flexWrap: 'wrap', gap: '2px 16px' }}>
             {cv.contact.email && (
-              <a href={`mailto:${cv.contact.email}`} style={{ color: 'inherit', textDecoration: 'none' }}>
-                <Ed value={cv.contact.email} onChange={(v) => update(['contact', 'email'], v)} />
-              </a>
+              <ContactRow href={`mailto:${cv.contact.email}`} value={cv.contact.email} onChange={(v) => update(['contact', 'email'], v)} />
             )}
             {cv.contact.phone && (
-              <a href={`tel:${(cv.contact.phone || '').replace(/\s+/g, '')}`} style={{ color: 'inherit', textDecoration: 'none' }}>
-                <Ed value={cv.contact.phone} onChange={(v) => update(['contact', 'phone'], v)} />
-              </a>
+              <ContactRow href={`tel:${(cv.contact.phone || '').replace(/\s+/g, '')}`} value={cv.contact.phone} onChange={(v) => update(['contact', 'phone'], v)} />
             )}
             {cv.contact.linkedin && (
-              <a href={`https://${(cv.contact.linkedin || '').replace(/^https?:\/\//, '')}`} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>
-                <Ed value={cv.contact.linkedin} onChange={(v) => update(['contact', 'linkedin'], v)} />
-              </a>
+              <ContactRow href={`https://${(cv.contact.linkedin || '').replace(/^https?:\/\//, '')}`} value={cv.contact.linkedin} onChange={(v) => update(['contact', 'linkedin'], v)} external />
             )}
             {cv.contact.location && <Ed value={cv.contact.location} onChange={(v) => update(['contact', 'location'], v)} style={{ color: V1_MUTED }} />}
             {cv.contact.relocation && <Ed value={cv.contact.relocation} onChange={(v) => update(['contact', 'relocation'], v)} style={{ color: V1_MUTED, fontStyle: 'italic' }} />}
