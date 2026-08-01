@@ -20,9 +20,15 @@
   /* Center the document */
   .cv-stage {
     display: flex; flex-direction: column; align-items: center;
-    padding: 96px 16px 120px; gap: 0;
+    /* Divided by --cv-zoom so the gap below the toolbar stays put: CSS `zoom`
+       scales this padding too, which would otherwise push the document further
+       down (and out of line with the side panels) at higher zoom levels. */
+    padding: calc(96px / var(--cv-zoom, 1)) 16px calc(120px / var(--cv-zoom, 1));
+    gap: 0;
   }
-  .cv-stage[data-doc=applications] { padding-top: 84px; align-items: stretch; }
+  .cv-stage[data-doc=applications] {
+    padding-top: calc(84px / var(--cv-zoom, 1)); align-items: stretch;
+  }
   .cv-page {
     box-shadow: 0 4px 32px rgba(0,0,0,.12);
     background: #fff;
@@ -442,15 +448,24 @@
     padding: 2px 5px; border-radius: 4px; letter-spacing: 0;
   }
   .hs-head-actions button:hover { opacity: 1; background: #2a2520; }
-  /* Reopen pill, mirroring the Tweaks pill but on the opposite corner */
-  .hs-reopen {
-    position: fixed; bottom: 16px; left: 16px; z-index: 1000;
-    background: #17181a; color: #fff; border: 1px solid #3a342d;
-    border-radius: 999px; padding: 8px 14px; font-size: 12px; cursor: pointer;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, .25); font-family: 'Inter Tight', sans-serif;
-    display: inline-flex; align-items: center; gap: 6px;
+  /* Collapsed state for both panels: a title-bar-shaped strip sitting exactly
+     where the panel was, so minimising reads as the window rolling up rather
+     than flying off to a corner. */
+  .panel-reopen {
+    position: fixed; top: 96px; z-index: 1000;
+    background: #1c1d20; color: rgba(255, 255, 255, 0.7);
+    border: none; border-radius: 10px;
+    padding: 9px 12px; cursor: pointer;
+    font-family: 'Inter Tight', sans-serif;
+    font-size: 9.5px; letter-spacing: 1.4px; text-transform: uppercase; font-weight: 600;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
+    display: inline-flex; align-items: center; justify-content: space-between; gap: 8px;
+    text-align: left;
   }
-  .hs-reopen:hover { background: #222326; }
+  .panel-reopen:hover { background: #24262a; color: #fff; }
+  .panel-reopen .chev { opacity: 0.55; font-size: 12px; letter-spacing: 0; }
+  .hs-reopen     { left: var(--hs-left, 8px);   width: 232px; }
+  .tweaks-reopen { left: var(--tw-left, auto);  width: 280px; }
   .hs-controls-body {
     padding: 12px; display: flex; flex-direction: column; gap: 12px;
     overflow-y: auto;
@@ -2034,9 +2049,10 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
     onGrab(e, panelDragPos || (r ? { left: r.left, top: r.top } : null));
   };
   const controls = editable && hsHidden ? (
-    <button type="button" className="hs-reopen screen-only"
+    <button type="button" className="panel-reopen hs-reopen screen-only"
       onClick={() => hidePanel(false)} title="Show headshot controls">
-      ◲ Headshot
+      <span>Headshot</span>
+      <span className="chev">▸</span>
     </button>
   ) : editable ? (
     <div className="hs-controls screen-only" ref={panelRef}
@@ -3717,15 +3733,10 @@ function TweaksPanel({ editOn, cv, update, headshotSrc }) {
   };
   if (collapsed) {
     return (
-      <button type="button" onClick={toggleCollapsed} title="Show tweaks"
-        style={{
-          position: 'fixed', bottom: 16, right: 16, zIndex: 1000,
-          background: '#17181a', color: '#fff', border: '1px solid #3a342d',
-          borderRadius: 999, padding: '8px 14px', fontSize: 12, cursor: 'pointer',
-          boxShadow: '0 6px 24px rgba(0,0,0,.25)', fontFamily: 'inherit',
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-        }}>
-        ⚙ Tweaks
+      <button type="button" className="panel-reopen tweaks-reopen"
+        onClick={toggleCollapsed} title="Show tweaks">
+        <span>Tweaks</span>
+        <span className="chev">▸</span>
       </button>
     );
   }
@@ -5072,8 +5083,11 @@ function App() {
         </div>
       )}
       {viewingSnapshot && <SnapshotBanner snap={viewingSnapshot} onClose={() => setViewingSnapshot(null)} />}
+      {/* --cv-zoom lets the stage divide out its own padding: CSS `zoom` scales
+          padding along with everything else, which otherwise walks the document
+          further from the toolbar the more you zoom in. */}
       <div className="cv-stage" data-zoom={zoom !== 1 ? '1' : undefined} data-doc={doc}
-        style={zoom !== 1 ? { zoom } : undefined}>
+        style={zoom !== 1 ? { zoom, '--cv-zoom': zoom } : undefined}>
         {mainContent}
       </div>
       {doc === 'cv' && !viewingSnapshot && <TweaksPanel editOn={editOn} cv={cv} update={update} headshotSrc={headshotSrc} />}
