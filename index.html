@@ -212,51 +212,6 @@
      Each visible CVPage is fixed A4; the visible heading repeats at the top
      of any later page that continues a section. */
 
-  /* Template picker pill */
-  .toolbar .template-pill { position: relative; flex-shrink: 0; }
-  .toolbar .template-pill .template-trigger {
-    display: inline-flex; align-items: center; gap: 6px;
-    background: linear-gradient(180deg, #2e2924 0%, #25201c 100%);
-    color: #f4efe6; border: 1px solid #3a342d; border-bottom-color: #2a2520;
-    border-radius: 6px; padding: 4px 10px;
-    font: inherit; font-size: 11.5px; cursor: pointer;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 0 rgba(0,0,0,0.25);
-    transition: background 140ms, border-color 140ms;
-  }
-  .toolbar .template-pill .template-trigger:hover {
-    background: linear-gradient(180deg, #3c362e 0%, #2f2a25 100%);
-    border-color: #4a443c;
-  }
-  .toolbar .template-pill .template-trigger .label { font-weight: 500; }
-  .toolbar .template-pill .template-trigger .caret { font-size: 9px; opacity: 0.7; }
-  .template-popover {
-    position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
-    z-index: 1100;
-    background: #fff; color: #2a2a26;
-    border: 1px solid #e2ddd2; border-radius: 10px;
-    padding: 6px; min-width: 280px;
-    box-shadow: 0 10px 28px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.06);
-    display: flex; flex-direction: column; gap: 2px;
-    font-family: 'Inter Tight', sans-serif;
-  }
-  .template-option {
-    display: flex; align-items: center; gap: 12px;
-    padding: 8px 10px; border-radius: 8px;
-    background: transparent; border: none; color: #2a2a26;
-    font: inherit; font-size: 13px; cursor: pointer; text-align: left;
-    transition: background 100ms;
-  }
-  .template-option:hover { background: #faf8f3; }
-  .template-option.active { background: #fdf2ee; color: #2a2a26; }
-  .template-option.active .name { font-weight: 600; }
-  .template-option .name { flex: 1; }
-  .template-option .check { color: #c96442; font-size: 13px; font-weight: 700; }
-  .template-popover-foot {
-    padding: 8px 10px 4px; border-top: 1px solid #ece7da; margin-top: 4px;
-    font-size: 10.5px; color: #8a857a; text-align: center;
-    letter-spacing: 0.2px;
-  }
-
   /* Template picker inside NewApplicationForm */
   .new-app-template-picker { position: relative; }
   .new-app-template-picker .picker-trigger {
@@ -334,14 +289,10 @@
   /* Sync banner under toolbar */
   .sync-banner {
     position: fixed; top: 92px; left: 50%; transform: translateX(-50%);
-    z-index: 998;
-    /* Capped to the document's width so it stays clear of the side panels,
-       which sit in the gutters at the same height. Wraps to two lines when
-       the document is narrow rather than sliding underneath them. */
-    max-width: min(calc(100vw - 32px), var(--doc-w, 640px));
-    /* border-box so the cap covers padding and border too; otherwise the
-       banner overshoots the document by 30px and eats the panel clearance. */
-    box-sizing: border-box;
+    /* Deliberately allowed to overlap the side panels: it is transient, and
+       both its actions stay clickable. Capping it to the document's width
+       made it wrap to three lines at low zoom, which was worse. */
+    z-index: 998; max-width: calc(100vw - 32px);
     background: #fff; color: #2a2a26;
     border: 1px solid #e2ddd2; border-radius: 10px;
     box-shadow: 0 6px 18px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.06);
@@ -367,7 +318,7 @@
     .sync-banner { display: none !important; }
   }
 
-  /* Tweaks panel. Mirrors .hs-controls into the gutter right of the document. */
+  /* Inspector panel (tweaks), in the gutter right of the document. */
   .tweaks-panel {
     position: fixed; z-index: 1000;
     top: 96px; left: var(--tw-left, auto); right: auto;
@@ -376,7 +327,7 @@
     box-shadow: 0 6px 24px rgba(0,0,0,.25);
     display: flex; flex-direction: column; overflow: hidden;
   }
-  /* Grab bar. Mirrors .hs-controls-head so the two panels read as one family. */
+  /* Grab bar */
   .tweaks-head {
     padding: 8px 8px 8px 14px; border-bottom: 1px solid #2a2520;
     background: #1c1d20; flex-shrink: 0;
@@ -393,7 +344,37 @@
     padding: 2px 5px; border-radius: 4px; letter-spacing: 0;
   }
   .tweaks-head-actions button:hover { opacity: 1; background: #2a2520; }
-  .tweaks-body { padding: 12px 14px; overflow-y: auto; }
+  .tweaks-body { padding: 6px 8px 8px; overflow-y: auto; }
+  /* Accordion groups inside the inspector */
+  .acc { border-radius: 8px; }
+  .acc + .acc { margin-top: 2px; }
+  .acc-head {
+    width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    background: transparent; border: none; color: rgba(255, 255, 255, 0.82);
+    font: inherit; font-size: 11px; font-weight: 600;
+    letter-spacing: 0.8px; text-transform: uppercase;
+    padding: 8px 6px; cursor: pointer; border-radius: 8px;
+    text-align: left;
+  }
+  .acc-head:hover { background: #22232680; color: #fff; }
+  .acc-head .marker { font-size: 10px; opacity: 0.5; transition: transform 120ms; }
+  .acc.open > .acc-head .marker { transform: rotate(90deg); }
+  .acc-note {
+    margin-left: 6px; font-weight: 400; text-transform: none; letter-spacing: 0.2px;
+    opacity: 0.55; font-size: 10.5px;
+  }
+  .acc-body { padding: 2px 6px 12px; }
+  /* Template options as a flat list inside the inspector */
+  .tmpl-opt {
+    width: 100%; display: flex; align-items: center; gap: 10px;
+    background: transparent; border: 1px solid transparent; border-radius: 6px;
+    color: rgba(255, 255, 255, 0.85); font: inherit; font-size: 11.5px;
+    padding: 6px 8px; cursor: pointer; text-align: left;
+  }
+  .tmpl-opt:hover { background: #22232680; }
+  .tmpl-opt.active { border-color: #c96442; background: rgba(201, 100, 66, 0.14); }
+  .tmpl-opt .name { flex: 1; }
+  .tmpl-opt .check { color: #ffb499; font-weight: 700; }
   .tweaks-panel h4 { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase; opacity: .75; font-weight: 600; }
   .tweaks-panel .group { border-top: 1px solid #2a2520; padding-top: 10px; margin-top: 10px; }
   .tweaks-panel .group:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
@@ -426,41 +407,7 @@
     background: #c96442; border: 2px solid #fff; border-radius: 50%;
     cursor: nwse-resize; z-index: 5;
   }
-  /* Floating headshot controls. Defaults to the gutter left of the document;
-     --doc-left is published by the app and tracks zoom. max() keeps it on
-     screen when the window is too narrow for a gutter that wide. */
-  .hs-controls {
-    position: fixed; z-index: 1000;
-    top: 96px; left: var(--hs-left, 8px);
-    background: #17181a; color: #fff;
-    border-radius: 10px;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
-    font-family: 'Inter Tight', sans-serif; font-size: 11px;
-    width: 232px; max-height: calc(100vh - 112px);
-    display: flex; flex-direction: column; overflow: hidden;
-    animation: hs-controls-in 140ms ease-out;
-  }
-  @keyframes hs-controls-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  .hs-controls-head {
-    padding: 8px 8px 8px 12px; border-bottom: 1px solid #2a2520; flex-shrink: 0;
-    background: #1c1d20;
-    font-size: 9.5px; letter-spacing: 1.4px; text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.55); font-weight: 600;
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    cursor: grab; user-select: none;
-  }
-  .hs-controls-head:active { cursor: grabbing; }
-  .hs-head-actions { display: inline-flex; gap: 2px; }
-  .hs-head-actions button {
-    background: transparent; border: none; color: #fff; opacity: 0.5;
-    cursor: pointer; font: inherit; font-size: 13px; line-height: 1;
-    padding: 2px 5px; border-radius: 4px; letter-spacing: 0;
-  }
-  .hs-head-actions button:hover { opacity: 1; background: #2a2520; }
-  /* Collapsed state for both panels: a title-bar-shaped strip sitting exactly
+  /* Collapsed state for the inspector: a title-bar-shaped strip sitting exactly
      where the panel was, so minimising reads as the window rolling up rather
      than flying off to a corner. */
   .panel-reopen {
@@ -476,66 +423,65 @@
   }
   .panel-reopen:hover { background: #24262a; color: #fff; }
   .panel-reopen .chev { opacity: 0.55; font-size: 12px; letter-spacing: 0; }
-  .hs-reopen     { left: var(--hs-left, 8px);   width: 232px; }
   .tweaks-reopen { left: var(--tw-left, auto);  width: 280px; }
-  .hs-controls-body {
-    padding: 12px; display: flex; flex-direction: column; gap: 12px;
-    overflow-y: auto;
+  /* Headshot controls, rendered into the inspector's Headshot group. */
+  .hs-fields {
+    display: flex; flex-direction: column; gap: 12px;
   }
-  .hs-controls .hs-group { display: flex; flex-direction: column; gap: 5px; }
-  .hs-controls .hs-group-label {
+  .hs-fields .hs-group { display: flex; flex-direction: column; gap: 5px; }
+  .hs-fields .hs-group-label {
     font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase;
     color: rgba(255, 255, 255, 0.5); font-weight: 500;
   }
-  .hs-controls .shapes { display: flex; gap: 4px; flex-wrap: wrap; }
-  .hs-controls .shape-btn {
+  .hs-fields .shapes { display: flex; gap: 4px; flex-wrap: wrap; }
+  .hs-fields .shape-btn {
     width: 28px; height: 28px; border: 1px solid #2a2520; background: #0e0e0c;
     cursor: pointer; padding: 4px; border-radius: 4px;
     display: flex; align-items: center; justify-content: center;
     transition: border-color 120ms, background 120ms;
   }
-  .hs-controls .shape-btn:hover { border-color: #4a443c; background: #1a1a18; }
-  .hs-controls .shape-btn.active { border-color: #c96442; background: rgba(201, 100, 66, 0.18); }
-  .hs-controls .shape-btn svg { width: 16px; height: 16px; fill: #e8e4dd; }
-  .hs-controls .shape-btn.active svg { fill: #ffb499; }
-  .hs-controls input[type=range] {
+  .hs-fields .shape-btn:hover { border-color: #4a443c; background: #1a1a18; }
+  .hs-fields .shape-btn.active { border-color: #c96442; background: rgba(201, 100, 66, 0.18); }
+  .hs-fields .shape-btn svg { width: 16px; height: 16px; fill: #e8e4dd; }
+  .hs-fields .shape-btn.active svg { fill: #ffb499; }
+  .hs-fields input[type=range] {
     accent-color: #c96442; width: 100%; min-width: 0; cursor: pointer;
   }
-  .hs-controls .hs-slider { display: flex; flex-direction: column; gap: 5px; }
-  .hs-controls .hs-slider-head {
+  .hs-fields .hs-slider { display: flex; flex-direction: column; gap: 5px; }
+  .hs-fields .hs-slider-head {
     display: flex; align-items: center; justify-content: space-between;
   }
-  .hs-controls .hs-slider-label {
+  .hs-fields .hs-slider-label {
     font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase;
     color: rgba(255, 255, 255, 0.5); font-weight: 500;
   }
-  .hs-controls .hs-slider-value {
+  .hs-fields .hs-slider-value {
     display: inline-flex; align-items: baseline; gap: 1px;
     padding: 1px 5px; border-radius: 3px;
     background: #0e0e0c; border: 1px solid #2a2520;
     transition: border-color 120ms;
   }
-  .hs-controls .hs-slider-value:focus-within { border-color: #c96442; }
-  .hs-controls .hs-slider-value input[type=number] {
+  .hs-fields .hs-slider-value:focus-within { border-color: #c96442; }
+  .hs-fields .hs-slider-value input[type=number] {
     width: 26px; border: none; outline: none; background: transparent;
     color: #fff; font: inherit; font-size: 11px;
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     text-align: right; padding: 0; -moz-appearance: textfield;
   }
-  .hs-controls .hs-slider-value input[type=number]::-webkit-outer-spin-button,
-  .hs-controls .hs-slider-value input[type=number]::-webkit-inner-spin-button {
+  .hs-fields .hs-slider-value input[type=number]::-webkit-outer-spin-button,
+  .hs-fields .hs-slider-value input[type=number]::-webkit-inner-spin-button {
     -webkit-appearance: none; margin: 0;
   }
-  .hs-controls .hs-slider-unit {
+  .hs-fields .hs-slider-unit {
     font-size: 9px; color: rgba(255, 255, 255, 0.55);
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
   }
-  .hs-controls button.ghost {
+  .hs-fields button.ghost {
     background: #2a2520; color: #fff; border: 1px solid #3a342d;
     border-radius: 4px; padding: 4px 8px; font: inherit; font-size: 10px; cursor: pointer;
     transition: background 120ms, border-color 120ms;
   }
-  .hs-controls button.ghost:hover { background: #3a342d; border-color: #4a443c; }
+  .hs-fields button.ghost:hover { background: #3a342d; border-color: #4a443c; }
 
   /* Editable field marker */
   [data-ed=on] {
@@ -861,7 +807,7 @@
   @media print {
     @page { size: A4; margin: 0; }
     body, html { background: #fff !important; }
-    .toolbar, .tweaks-panel, .pb-marker, .hs-controls, .hs-resize, .screen-only, .snapshot-banner, .apps-shell { display: none !important; }
+    .toolbar, .tweaks-panel, .pb-marker, .panel-reopen, .hs-resize, .screen-only, .snapshot-banner, .apps-shell { display: none !important; }
     .print-only { display: inline !important; }
     [data-ed] { box-shadow: none !important; background: transparent !important; outline: none !important; }
     .cv-stage { padding: 0 !important; zoom: 1 !important; }
@@ -1862,12 +1808,17 @@ function EdDotList({ items, onChange, ink, inkSoft }) {
 // ════════════════════════════════════════════════════════════════
 //  Draggable floating panels
 // ════════════════════════════════════════════════════════════════
-// Shared drag-by-handle behaviour for the floating panels (headshot controls,
-// tweaks). dragPos stays null until the user actually drags, which is how each
-// panel knows to keep using its own default anchoring until then.
-//   docCoords: true  → left/top include scroll offset (position: absolute)
-//   docCoords: false → viewport coords (position: fixed)
-function usePanelDrag({ width, handleH = 40, docCoords = false }) {
+// Bridges the headshot frame (deep in the CV sidebar) to the inspector panel
+// (a sibling of the whole document), without lifting headshot state or
+// drilling props through four layers.
+//   slot           the inspector's Headshot group, as a portal target
+//   focusHeadshot  called when the frame is clicked, so the group can open
+const HeadshotPanelContext = React.createContext({ slot: null, focusHeadshot: () => {} });
+
+// Drag-by-handle behaviour for the inspector panel, in viewport coordinates
+// (the panel is position: fixed). dragPos stays null until the user actually
+// drags, which is how the panel knows to keep its default gutter anchoring.
+function usePanelDrag({ width, handleH = 40 }) {
   const [dragPos, setDragPos] = React.useState(null);
   const [dragging, setDragging] = React.useState(false);
   const start = React.useRef(null);
@@ -1876,14 +1827,12 @@ function usePanelDrag({ width, handleH = 40, docCoords = false }) {
     const move = (e) => {
       const s = start.current;
       if (!s) return;
-      const ox = docCoords ? (window.scrollX || 0) : 0;
-      const oy = docCoords ? (window.scrollY || 0) : 0;
-      // Clamp so a panel can never be dragged somewhere unreachable.
-      const maxLeft = ox + window.innerWidth - width - 8;
-      const maxTop = oy + window.innerHeight - handleH;
+      // Clamp so the panel can never be dragged somewhere unreachable.
+      const maxLeft = window.innerWidth - width - 8;
+      const maxTop = window.innerHeight - handleH;
       setDragPos({
-        left: Math.max(ox + 8, Math.min(maxLeft, s.left + e.clientX - s.sx)),
-        top: Math.max(oy + 8, Math.min(maxTop, s.top + e.clientY - s.sy)),
+        left: Math.max(8, Math.min(maxLeft, s.left + e.clientX - s.sx)),
+        top: Math.max(8, Math.min(maxTop, s.top + e.clientY - s.sy)),
       });
     };
     const up = () => { start.current = null; setDragging(false); };
@@ -1893,7 +1842,7 @@ function usePanelDrag({ width, handleH = 40, docCoords = false }) {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
-  }, [dragging, width, handleH, docCoords]);
+  }, [dragging, width, handleH]);
   // base is where the panel currently sits, in whichever coord space it uses.
   const onGrab = (e, base) => {
     if (e.target.closest('button')) return;
@@ -2040,50 +1989,15 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
 
   const justify = align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start';
 
-  // Same model as the tweaks panel: pinned to a viewport corner by default and
-  // dragged from there. It used to chase the headshot frame in document
-  // coordinates, which needed observers to survive zoom and reflow; now that
-  // the user can put it where they want, none of that is necessary.
-  const PANEL_W = 232;
-  const [hsHidden, setHsHidden] = React.useState(() => {
-    try { return localStorage.getItem('cv-hs-hidden') === '1'; } catch { return false; }
-  });
-  const hidePanel = (hidden) => {
-    setHsHidden(hidden);
-    try { localStorage.setItem('cv-hs-hidden', hidden ? '1' : '0'); } catch {}
-  };
-  const panelRef = React.useRef(null);
-  const { dragPos: panelDragPos, setDragPos: setPanelDragPos, onGrab } =
-    usePanelDrag({ width: PANEL_W });
-  const onPanelDragDown = (e) => {
-    // First grab: still corner-anchored, so read where it actually sits.
-    const r = panelRef.current && panelRef.current.getBoundingClientRect();
-    onGrab(e, panelDragPos || (r ? { left: r.left, top: r.top } : null));
-  };
-  const controls = editable && hsHidden ? (
-    <button type="button" className="panel-reopen hs-reopen screen-only"
-      onClick={() => hidePanel(false)} title="Show headshot controls">
-      <span>Headshot</span>
-      <span className="chev">▸</span>
-    </button>
-  ) : editable ? (
-    <div className="hs-controls screen-only" ref={panelRef}
-      style={panelDragPos
-        ? { left: panelDragPos.left, top: panelDragPos.top, right: 'auto', bottom: 'auto' }
-        : undefined}>
-      <div className="hs-controls-head" onPointerDown={onPanelDragDown}
-        title="Drag to move this panel">
-        <span>Headshot</span>
-        <span className="hs-head-actions">
-          {panelDragPos && (
-            <button type="button" onClick={() => setPanelDragPos(null)}
-              title="Snap back to the corner">⟲</button>
-          )}
-          <button type="button" onClick={() => hidePanel(true)}
-            title="Hide this panel">×</button>
-        </span>
-      </div>
-      <div className="hs-controls-body">
+  // The controls are not their own window; they render into the inspector's
+  // Headshot group via a slot the inspector publishes through context. All the
+  // headshot state stays here — only the chrome moved.
+  const { slot: hsSlot, focusHeadshot } = React.useContext(HeadshotPanelContext);
+  const controls = editable ? (
+    <div className="hs-fields">
+        {/* Shape, radius, and alignment only apply once an image exists;
+            before that the group is just the upload action. */}
+        {src && <>
         <div className="hs-group">
           <div className="hs-group-label">Shape</div>
           <div className="shapes">
@@ -2138,6 +2052,7 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
             ))}
           </div>
         </div>
+        </>}
         {src && (
           <>
             <div className="hs-slider">
@@ -2159,7 +2074,6 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
         {!src && (
           <button type="button" className="ghost" onClick={() => inputRef.current && inputRef.current.click()}>Upload image</button>
         )}
-      </div>
     </div>
   ) : null;
 
@@ -2170,7 +2084,7 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
           ref={frameRef}
           className={`hs-frame ${!src ? 'empty' : ''} ${editable ? 'editing' : ''} ${dragging ? 'dragging' : ''}`}
           style={{ width: t.size, height: t.size, clipPath: effectiveClip, WebkitClipPath: effectiveClip }}
-          onPointerDown={onPointerDown}
+          onPointerDown={(e) => { if (editable) focusHeadshot(); onPointerDown(e); }}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
@@ -2202,7 +2116,7 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
         </div>
         {editable && src && <div className="hs-resize screen-only" onPointerDown={onResizeDown} title="Resize frame" />}
       </div>
-      {controls && ReactDOM.createPortal(controls, document.body)}
+      {controls && hsSlot && ReactDOM.createPortal(controls, hsSlot)}
     </div>
   );
 }
@@ -3586,53 +3500,6 @@ function TemplateWireframe({ templateId, size = 'sm' }) {
   );
 }
 
-function TemplatePill({ value, onChange }) {
-  const [open, setOpen] = React.useState(false);
-  const rootRef = React.useRef(null);
-  React.useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e) => { if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false); };
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
-    document.addEventListener('mousedown', onDocClick);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDocClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-  const current = resolveTemplateId(value);
-  const currentLabel = TEMPLATES[current].label;
-  return (
-    <div className="template-pill" ref={rootRef}>
-      <button type="button"
-        className="template-trigger"
-        title="Change CV template"
-        aria-haspopup="true" aria-expanded={open}
-        onClick={() => setOpen(o => !o)}>
-        <TemplateWireframe templateId={current} size="sm" />
-        <span className="label">{currentLabel}</span>
-        <span className="caret">▾</span>
-      </button>
-      {open && (
-        <div className="template-popover">
-          {Object.entries(TEMPLATES).map(([id, t]) => (
-            <button key={id} type="button"
-              className={`template-option ${id === current ? 'active' : ''}`}
-              onClick={() => { onChange(id); setOpen(false); }}>
-              <TemplateWireframe templateId={id} size="lg" />
-              <span className="name">{t.label}</span>
-              {id === current && <span className="check">✓</span>}
-            </button>
-          ))}
-          <div className="template-popover-foot">
-            Switching templates doesn't change your data.
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ════════════════════════════════════════════════════════════════
 //  Toolbar + Tweaks
 // ════════════════════════════════════════════════════════════════
@@ -3640,7 +3507,6 @@ function Toolbar({ editOn, setEditOn, onPrint, onExport, onImport,
                    doc, setDoc, appsCount = 0, zoom = 1, setZoom,
                    syncState = 'unsupported', syncDirName = '',
                    onSetUpSync, onReconnectSync, onUnbindSync,
-                   templateId = DEFAULT_TEMPLATE_ID, onTemplateChange,
                    viewingSnapshot = false }) {
   const fileRef = React.useRef(null);
   const docBtn = (id, label) => (
@@ -3687,12 +3553,6 @@ function Toolbar({ editOn, setEditOn, onPrint, onExport, onImport,
         {docBtn('applications', 'Applications')}
         {docBtn('cv', 'CV')}
         {docBtn('letter', 'Cover Letter')}
-        {doc === 'cv' && onTemplateChange && (
-          <>
-            <span className="sep" />
-            <TemplatePill value={templateId} onChange={onTemplateChange} />
-          </>
-        )}
         <span className="sep" />
         <button className="primary" onClick={onPrint} title="Open the print dialog — choose “Save as PDF” to download">Save as PDF</button>
         <span className="sep" />
@@ -3722,8 +3582,24 @@ function Toolbar({ editOn, setEditOn, onPrint, onExport, onImport,
   );
 }
 
-function TweaksPanel({ editOn, cv, update, headshotSrc }) {
-  if (!editOn) return null;
+function InspectorGroup({ id, title, note, open, onToggle, children }) {
+  return (
+    <div className={`acc ${open ? 'open' : ''}`} data-group={id}>
+      <button type="button" className="acc-head" aria-expanded={open}
+        onClick={() => onToggle(id)}>
+        <span>{title}{note != null && <span className="acc-note">{note}</span>}</span>
+        <span className="marker">▸</span>
+      </button>
+      {open && <div className="acc-body">{children}</div>}
+    </div>
+  );
+}
+
+function TweaksPanel({ editOn, cv, update, headshotSrc,
+                      templateId, onTemplateChange, hsFocusTick = 0, onHsSlotRef }) {
+  // Every hook precedes the visibility returns. The old version returned null
+  // above its useState calls, so toggling Edit changed the hook count between
+  // renders — a rules-of-hooks violation that happened not to bite yet.
   const [collapsed, setCollapsed] = React.useState(() => {
     try { return localStorage.getItem('cv-tweaks-collapsed') === '1'; } catch { return false; }
   });
@@ -3734,15 +3610,45 @@ function TweaksPanel({ editOn, cv, update, headshotSrc }) {
       return next;
     });
   };
-  // Declared above the collapsed early-return so the hook order stays stable.
   // The panel is position:fixed, so the drag works in viewport coords.
   const panelRef = React.useRef(null);
+  const bodyRef = React.useRef(null);
   const { dragPos, setDragPos, onGrab } = usePanelDrag({ width: 280 });
   const onHeadDown = (e) => {
-    // First grab: the panel is still corner-anchored, so read where it actually is.
+    // First grab: the panel is still gutter-anchored, so read where it actually is.
     const r = panelRef.current && panelRef.current.getBoundingClientRect();
     onGrab(e, dragPos || (r ? { left: r.left, top: r.top } : null));
   };
+  // Which accordion groups are open. Colour scheme and Sections start open;
+  // the rest reveal on demand.
+  const [openGroups, setOpenGroups] = React.useState(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem('cv-inspector-open'));
+      if (v && typeof v === 'object') return v;
+    } catch {}
+    return { colours: true, sections: true };
+  });
+  const toggleGroup = (id) => setOpenGroups(o => {
+    const next = { ...o, [id]: !o[id] };
+    try { localStorage.setItem('cv-inspector-open', JSON.stringify(next)); } catch {}
+    return next;
+  });
+  // Clicking the headshot frame on the page bumps hsFocusTick: unroll the
+  // panel if minimised, open the Headshot group, and bring it into view.
+  const lastTick = React.useRef(hsFocusTick);
+  React.useEffect(() => {
+    if (hsFocusTick === lastTick.current) return;
+    lastTick.current = hsFocusTick;
+    setCollapsed(false);
+    setOpenGroups(o => (o.headshot ? o : { ...o, headshot: true }));
+    // Wait a frame so the group (and the portal into it) has mounted.
+    requestAnimationFrame(() => {
+      const el = bodyRef.current && bodyRef.current.querySelector('[data-group=headshot]');
+      if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  }, [hsFocusTick]);
+
+  if (!editOn) return null;
   if (collapsed) {
     return (
       <button type="button" className="panel-reopen tweaks-reopen"
@@ -3812,6 +3718,12 @@ function TweaksPanel({ editOn, cv, update, headshotSrc }) {
     update(['sidebar'], sidebar.filter(s => s.id !== sec.id));
     // Note: leaves cv[meta.dataKey] orphaned; harmless, no UI references it.
   };
+  const visibleSections = order.filter(s =>
+    s.visible && (isMainSectionId(s.id) || sidebarMetaById[s.id])).length;
+  const totalSections = order.filter(s =>
+    isMainSectionId(s.id) || sidebarMetaById[s.id]).length;
+  const currentTemplate = resolveTemplateId(templateId);
+
   return (
     <div className="tweaks-panel" ref={panelRef}
       style={dragPos ? { left: dragPos.left, top: dragPos.top, right: 'auto', bottom: 'auto' } : undefined}>
@@ -3825,28 +3737,56 @@ function TweaksPanel({ editOn, cv, update, headshotSrc }) {
           <button type="button" onClick={toggleCollapsed} title="Hide tweaks">×</button>
         </span>
       </div>
-      <div className="tweaks-body">
-      <h4>Color scheme</h4>
-      <div className="swatches">
-        {COLOR_SCHEMES.map(s => (
-          <div key={s.id} className={`swatch ${theme.ink === s.ink && theme.side === s.side ? 'active' : ''}`}
-            title={s.name} onClick={() => update(['theme'], { ink: s.ink, side: s.side })}>
-            <div className="ink" style={{ background: s.ink }} />
-            <div className="side" style={{ background: s.side }} />
-          </div>
-        ))}
-      </div>
-      <div className="row" style={{ marginTop: 8 }}>
-        <span style={{ width: 28, opacity: 0.7 }}>ink</span>
-        <input type="text" value={theme.ink || ''} onChange={(e) => update(['theme'], { ...theme, ink: e.target.value })} />
-      </div>
-      <div className="row">
-        <span style={{ width: 28, opacity: 0.7 }}>side</span>
-        <input type="text" value={theme.side || ''} onChange={(e) => update(['theme'], { ...theme, side: e.target.value })} />
-      </div>
+      <div className="tweaks-body" ref={bodyRef}>
 
-      <div className="group">
-        <h4>Sections</h4>
+      <InspectorGroup id="template" title="Template"
+        note={TEMPLATES[currentTemplate].label}
+        open={!!openGroups.template} onToggle={toggleGroup}>
+        {Object.entries(TEMPLATES).map(([id, t]) => (
+          <button key={id} type="button"
+            className={`tmpl-opt ${id === currentTemplate ? 'active' : ''}`}
+            onClick={() => onTemplateChange && onTemplateChange(id)}>
+            <TemplateWireframe templateId={id} size="sm" />
+            <span className="name">{t.label}</span>
+            {id === currentTemplate && <span className="check">✓</span>}
+          </button>
+        ))}
+        <div style={{ fontSize: 10, opacity: 0.6, paddingTop: 2 }}>
+          Switching templates doesn't change your data.
+        </div>
+      </InspectorGroup>
+
+      <InspectorGroup id="colours" title="Colour scheme"
+        open={!!openGroups.colours} onToggle={toggleGroup}>
+        <div className="swatches">
+          {COLOR_SCHEMES.map(s => (
+            <div key={s.id} className={`swatch ${theme.ink === s.ink && theme.side === s.side ? 'active' : ''}`}
+              title={s.name} onClick={() => update(['theme'], { ink: s.ink, side: s.side })}>
+              <div className="ink" style={{ background: s.ink }} />
+              <div className="side" style={{ background: s.side }} />
+            </div>
+          ))}
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <span style={{ width: 28, opacity: 0.7 }}>ink</span>
+          <input type="text" value={theme.ink || ''} onChange={(e) => update(['theme'], { ...theme, ink: e.target.value })} />
+        </div>
+        <div className="row">
+          <span style={{ width: 28, opacity: 0.7 }}>side</span>
+          <input type="text" value={theme.side || ''} onChange={(e) => update(['theme'], { ...theme, side: e.target.value })} />
+        </div>
+      </InspectorGroup>
+
+      <InspectorGroup id="headshot" title="Headshot"
+        note={headshotSrc ? null : 'empty'}
+        open={!!openGroups.headshot} onToggle={toggleGroup}>
+        {/* HeadshotEditor portals its controls in here; state stays with the frame. */}
+        <div ref={onHsSlotRef || undefined} />
+      </InspectorGroup>
+
+      <InspectorGroup id="sections" title="Sections"
+        note={`${visibleSections}/${totalSections}`}
+        open={!!openGroups.sections} onToggle={toggleGroup}>
         {order.map((s, i) => {
           const isMain = isMainSectionId(s.id);
           const meta = sidebarMetaById[s.id];
@@ -3873,10 +3813,11 @@ function TweaksPanel({ editOn, cv, update, headshotSrc }) {
             </div>
           );
         })}
-      </div>
+      </InspectorGroup>
 
-      <div className="group">
-        <h4>Footer credit</h4>
+      <InspectorGroup id="credit" title="Footer credit"
+        note={cv.showCredit ? 'on' : 'off'}
+        open={!!openGroups.credit} onToggle={toggleGroup}>
         <div className="row" title="A small grey line at the bottom of every CV page. Off by default.">
           <input type="checkbox" checked={!!cv.showCredit}
             onChange={(e) => update(['showCredit'], e.target.checked)} />
@@ -3895,15 +3836,17 @@ function TweaksPanel({ editOn, cv, update, headshotSrc }) {
             </div>
           </>
         )}
-      </div>
+      </InspectorGroup>
 
-      <div className="group">
-        <h4>Tips</h4>
+      <InspectorGroup id="tips" title="Tips"
+        open={!!openGroups.tips} onToggle={toggleGroup}>
         <div style={{ fontSize: 11, lineHeight: 1.5, opacity: 0.8 }}>
-          Click any text to edit. Drag image to pan; scroll to zoom; corner handle resizes the frame; pick a shape from the icon row.
-          Both floating panels can be dragged by their title bar.
+          Click any text to edit. Click the headshot to open its controls here.
+          Drag the image to pan; scroll to zoom; the corner handle resizes the frame.
+          This panel can be dragged by its title bar.
         </div>
-      </div>
+      </InspectorGroup>
+
       </div>
     </div>
   );
@@ -4577,14 +4520,9 @@ function App() {
       // The stage centres the page, so left + right spans the usable width,
       // excluding any reserved scrollbar gutter.
       const usable = r.left + r.right;
-      const GAP = 16, EDGE = 8, HS_W = 232, TW_W = 280;
-      root.style.setProperty('--hs-left',
-        `${Math.round(Math.max(EDGE, r.left - HS_W - GAP))}px`);
+      const GAP = 16, EDGE = 8, TW_W = 280;
       root.style.setProperty('--tw-left',
         `${Math.round(Math.min(usable - TW_W - EDGE, r.right + GAP))}px`);
-      // Anything centred over the document (the sync banner) caps its width
-      // here, so it cannot spill into the gutters and collide with a panel.
-      root.style.setProperty('--doc-w', `${Math.round(r.width)}px`);
     };
     setEdges();
     window.addEventListener('resize', setEdges);
@@ -5022,6 +4960,17 @@ function App() {
   };
 
   const noop = () => {};
+  // Bridge between the headshot frame (inside the CV) and the inspector's
+  // Headshot group. The slot is the group's body element, held as state so the
+  // portal re-renders when the group mounts or unmounts; the tick counts frame
+  // clicks so the inspector can open that group.
+  const [hsSlot, setHsSlot] = React.useState(null);
+  const [hsFocusTick, setHsFocusTick] = React.useState(0);
+  const hsPanelCtx = React.useMemo(() => ({
+    slot: hsSlot,
+    focusHeadshot: () => setHsFocusTick(t => t + 1),
+  }), [hsSlot]);
+
   let mainContent;
   if (viewingSnapshot) {
     const snapCv = viewingSnapshot.cv;
@@ -5074,14 +5023,13 @@ function App() {
 
   return (
     <StatusesContext.Provider value={statusesContextValue}>
+    <HeadshotPanelContext.Provider value={hsPanelCtx}>
       <Toolbar editOn={editOn} setEditOn={setEditOn}
         onPrint={onPrint} onExport={onExport} onImport={onImport}
         doc={doc} setDoc={setDoc} appsCount={apps.length}
         zoom={zoom} setZoom={(v) => setZoom(clampZoom(v))}
         syncState={syncState} syncDirName={syncDirName}
         onSetUpSync={onSetUpSync} onReconnectSync={onReconnectSync} onUnbindSync={onUnbindSync}
-        templateId={resolveTemplateId(cv.templateId)}
-        onTemplateChange={(id) => update(['templateId'], id)}
         viewingSnapshot={!!viewingSnapshot} />
       {syncState === 'idle' && !syncBannerDismissed && (
         <div className="sync-banner">
@@ -5105,7 +5053,13 @@ function App() {
         style={zoom !== 1 ? { zoom, '--cv-zoom': zoom } : undefined}>
         {mainContent}
       </div>
-      {doc === 'cv' && !viewingSnapshot && <TweaksPanel editOn={editOn} cv={cv} update={update} headshotSrc={headshotSrc} />}
+      {doc === 'cv' && !viewingSnapshot && (
+        <TweaksPanel editOn={editOn} cv={cv} update={update} headshotSrc={headshotSrc}
+          templateId={resolveTemplateId(cv.templateId)}
+          onTemplateChange={(id) => update(['templateId'], id)}
+          hsFocusTick={hsFocusTick} onHsSlotRef={setHsSlot} />
+      )}
+    </HeadshotPanelContext.Provider>
     </StatusesContext.Provider>
   );
 }
