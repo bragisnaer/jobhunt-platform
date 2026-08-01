@@ -1030,6 +1030,15 @@ const creditFor = (cv, left, right) => cv.showCredit
 // additionally requires a known TLD, so "Node.js" and "index.html" stay text.
 // Contact-shaped fields — the footer credit, the letter's sender block — pass
 // strict: false, because there the whole value is deliberately a link.
+//
+// On top of that, a writer can hang a URL off words of their own choosing by
+// writing `[my portfolio](bragi.dev)`. That spelling is not a taste for
+// Markdown; it is the only shape that keeps every other guarantee in this file
+// true at once. The value stays a plain string, so storage, backup, sync and
+// the cover letter's paragraph-slicing pagination all keep working with no
+// idea the feature exists; and because Ed reads its value back out of the DOM,
+// a link whose URL lived anywhere but in the text would be gone the moment the
+// field lost focus.
 const AUTO_LINK_RE = /([a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+|(?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s]*)?)/gi;
 const AUTO_LINK_TLD_RE = /^(com|org|net|io|co|ai|app|dev|me|xyz|info|blog|page|site|online|cloud|digital|tech|design|studio|works|edu|gov|mil|int|dk|se|no|fi|is|uk|ie|de|nl|be|fr|es|it|pt|ch|at|pl|cz|eu|ca|us|au|nz|jp|cn|in|br|za)$/i;
 const AUTO_LINK_TRAIL_RE = /[.,;:!?)\]}'"]+$/;
@@ -1038,8 +1047,20 @@ const linkHref = (token) => {
   if (token.includes('@')) return `mailto:${token}`;
   return `https://${token}`;
 };
-// Splits free text into [{ text, href }] runs; href is null for plain runs.
-function splitLinks(text, strict = true) {
+// A whole token that is itself link-shaped. Used to vet the right-hand half of
+// `[label](url)`, so that ordinary prose in brackets and parens — "(see the
+// appendix)", "[sic]" — is never mistaken for a link the writer asked for.
+const LINK_TOKEN_RE = new RegExp(`^(?:${AUTO_LINK_RE.source})$`, 'i');
+// The label may not contain brackets or a newline: without that the pattern
+// could swallow across two unrelated bracketed asides, and a label spanning a
+// paragraph break would put a link across a page boundary, which the letter's
+// slice-per-page pagination has no way to render.
+const CUSTOM_LINK_RE = /\[([^\[\]\n]+)\]\(([^()\s]+)\)/g;
+// Splits free text into [{ text, href, url }] runs; href is null for plain
+// runs, and url is set only on an explicit `[label](url)` — Ed uses that to
+// tell a link the writer authored from one we merely recognised in the prose,
+// because the two have to be written back out very differently.
+function splitAutoLinks(text, strict = true) {
   const src = String(text ?? '');
   const out = [];
   const re = new RegExp(AUTO_LINK_RE.source, 'gi'); // fresh regex: lastIndex is stateful
@@ -1062,15 +1083,71 @@ function splitLinks(text, strict = true) {
   if (last < src.length) out.push({ text: src.slice(last), href: null });
   return out;
 }
+function splitLinks(text, strict = true) {
+  const src = String(text ?? '');
+  const out = [];
+  const re = new RegExp(CUSTOM_LINK_RE.source, 'g');
+  let last = 0, m;
+  while ((m = re.exec(src)) !== null) {
+    if (!LINK_TOKEN_RE.test(m[2])) continue; // prose in brackets, not a link
+    if (m.index > last) out.push(...splitAutoLinks(src.slice(last, m.index), strict));
+    // The label is emitted verbatim and never auto-linked in turn: a label that
+    // happens to read "bragi.dev" must not sprout a second anchor inside the
+    // one the writer asked for, which is invalid HTML and unserialisable.
+    out.push({ text: m[1], href: linkHref(m[2]), url: m[2] });
+    last = m.index + m[0].length;
+  }
+  if (last < src.length) out.push(...splitAutoLinks(src.slice(last), strict));
+  return out;
+}
 const escHtml = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 const escAttr = (s) => escHtml(s).replace(/"/g, '&quot;');
+// The URL is carried on the anchor as the writer spelled it, not only as the
+// resolved href: linkHref turns "bragi.dev" into "https://bragi.dev", so
+// reading the href back would rewrite the body on every blur and the round
+// trip would never settle.
+const CUSTOM_LINK_ATTRS = (url) => ` data-link="custom" data-url="${escAttr(url)}"`;
 // HTML string rather than React children — Ed writes this straight into a
 // contenteditable node, where React must not own the child DOM (see Ed).
 function linkHtml(text, strict = true) {
   return splitLinks(text, strict).map(p => p.href
-    ? `<a href="${escAttr(p.href)}" target="_blank" rel="noopener noreferrer"`
+    ? `<a href="${escAttr(p.href)}" target="_blank" rel="noopener noreferrer"${p.url ? CUSTOM_LINK_ATTRS(p.url) : ''}`
       + ` style="color:inherit;text-decoration:none">${escHtml(p.text)}</a>`
     : escHtml(p.text)).join('');
+}
+// Turns the DOM back into the string it came from. Custom anchors are swapped
+// for their `[label](url)` source in place and the browser's own innerText
+// then does the rest, so newline handling stays exactly whatever the browser
+// decided it was — an inlined reimplementation of innerText would be a second,
+// subtly different answer to a question that already has one. Auto-linked
+// anchors are deliberately left alone: their text is the URL, so they serialise
+// back to the bare URL they started as rather than to `[url](url)`.
+function readLinkified(el, multiline) {
+  const anchors = Array.from(el.querySelectorAll('a[data-link="custom"]'));
+  const saved = anchors.map(a => a.innerHTML);
+  // An anchor whose label the user has deleted character by character is left
+  // behind by the browser as an empty <a>. Serialised faithfully it would come
+  // back as the literal text "[](url)", so it is dropped instead: with no
+  // words left to click there is no link to keep.
+  anchors.forEach(a => { a.textContent = a.textContent ? `[${a.textContent}](${a.dataset.url})` : ''; });
+  const text = multiline ? el.innerText : el.textContent;
+  anchors.forEach((a, i) => { a.innerHTML = saved[i]; });
+  return text;
+}
+// Builds the anchor ⌘K inserts. Same attributes linkHtml writes, because the
+// next re-render replaces this node with linkHtml's output and the two must be
+// indistinguishable — otherwise the link would visibly twitch on blur.
+function makeCustomAnchor(label, url) {
+  const a = document.createElement('a');
+  a.href = linkHref(url);
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.dataset.link = 'custom';
+  a.dataset.url = url;
+  a.style.color = 'inherit';
+  a.style.textDecoration = 'none';
+  a.textContent = label;
+  return a;
 }
 
 const COLOR_SCHEMES = [
@@ -1746,16 +1823,94 @@ async function hydrateFromPayload(dirHandle, payload) {
 // ════════════════════════════════════════════════════════════════
 //  Editable primitives
 // ════════════════════════════════════════════════════════════════
-// linkify renders URLs and email addresses inside the field as real anchors.
-// The data stays plain text: anchors are written imperatively and read back as
-// textContent on blur. React deliberately renders no children in that mode —
-// reconciling a virtual child list against a DOM the browser is also mutating
-// (contenteditable) is how you get "removeChild on a node that isn't a child".
+// linkify renders URLs and email addresses inside the field as real anchors,
+// plus any `[label](url)` the writer attached with ⌘K. The data stays plain
+// text: anchors are written imperatively and read back on blur by
+// readLinkified, which unwinds them to the source they were rendered from.
+// React deliberately renders no children in that mode — reconciling a virtual
+// child list against a DOM the browser is also mutating (contenteditable) is
+// how you get "removeChild on a node that isn't a child".
 function Ed({ value, onChange, style = {}, tag: T = 'span', multiline = false, placeholder,
               linkify = false, strictLinks = true }) {
   const ref = React.useRef(null);
   const lastExternal = React.useRef(value);
   const editable = !!window.__EDIT_ON;
+
+  const readField = (el) => linkify
+    ? readLinkified(el, multiline)
+    : (multiline ? el.innerText : el.textContent);
+
+  // Reads the field and pushes it upstream. ⌘K commits straight away rather
+  // than waiting for blur: unlike a keystroke this cannot change the rendered
+  // height — the label was already on the page and only the markup around it
+  // changed — so the cover letter cannot repaginate underneath the caret here.
+  const commit = (el) => {
+    const next = readField(el);
+    lastExternal.current = next;
+    onChange && onChange(next);
+    return next;
+  };
+
+  // ⌘K / Ctrl+K: hang a URL off the selected words, or re-point the link the
+  // caret is sitting in. window.prompt rather than a panel of our own, because
+  // any focusable UI would take focus off the contenteditable and take the
+  // selection with it — the one thing this command cannot do without.
+  const promptLink = (el) => {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    if (!el.contains(range.commonAncestorContainer)) return;
+
+    const node = range.startContainer;
+    const inside = (node.nodeType === 1 ? node : node.parentNode);
+    const existing = inside && inside.closest && inside.closest('a[data-link="custom"]');
+    if (existing && el.contains(existing)) {
+      const next = window.prompt('Link URL (leave empty to remove the link):', existing.dataset.url);
+      if (next === null) return;
+      const url = next.trim();
+      // Emptied means "these are just words again", so the anchor is replaced
+      // by its own label rather than left as a link to nowhere.
+      if (!url) existing.replaceWith(document.createTextNode(existing.textContent));
+      else if (!LINK_TOKEN_RE.test(url)) { window.alert(`"${url}" does not look like a URL or an email address.`); return; }
+      else { existing.dataset.url = url; existing.href = linkHref(url); }
+      commit(el);
+      return;
+    }
+
+    const label = String(sel);
+    if (!label.trim()) return; // nothing selected and not in a link: no target
+    // A label with brackets or a paragraph break in it cannot survive the round
+    // trip through `[label](url)`, so it is refused outright instead of being
+    // written into the body as markup that would then render as literal text.
+    if (/[\[\]\n]/.test(label)) {
+      window.alert('Pick words without square brackets or a line break in them.');
+      return;
+    }
+    const entered = window.prompt('Link URL:', 'https://');
+    if (entered === null) return;
+    const url = entered.trim();
+    if (!url) return;
+    if (!LINK_TOKEN_RE.test(url)) { window.alert(`"${url}" does not look like a URL or an email address.`); return; }
+    range.deleteContents();
+    const anchor = makeCustomAnchor(label, url);
+    range.insertNode(anchor);
+    // A selection that started inside an auto-linked URL leaves the new anchor
+    // nested inside the old one, with an emptied <a> around it. Rather than
+    // special-case every way a range can straddle an anchor, the field is
+    // rebuilt from the text it now serialises to — the same normalisation blur
+    // performs, only early — and the caret is put back by position, since the
+    // rebuild replaces the node we just made with an identical fresh one.
+    const at = Array.prototype.indexOf.call(el.querySelectorAll('a[data-link="custom"]'), anchor);
+    el.innerHTML = linkHtml(commit(el), strictLinks);
+    const fresh = el.querySelectorAll('a[data-link="custom"]')[at];
+    if (fresh) {
+      const after = document.createRange();
+      after.setStartAfter(fresh);
+      after.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(after);
+    }
+  };
 
   React.useEffect(() => {
     if (linkify || !ref.current) return;
@@ -1781,7 +1936,7 @@ function Ed({ value, onChange, style = {}, tag: T = 'span', multiline = false, p
       suppressContentEditableWarning
       onBlur={(e) => {
         const el = e.currentTarget;
-        const next = multiline ? el.innerText : el.textContent;
+        const next = readField(el);
         lastExternal.current = next;
         // Re-link here rather than leaning on the effect: an edit that ends up
         // back at the old value wouldn't re-run it, leaving raw text behind.
@@ -1790,6 +1945,11 @@ function Ed({ value, onChange, style = {}, tag: T = 'span', multiline = false, p
       }}
       onKeyDown={(e) => {
         if (!multiline && e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+        if (linkify && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+          e.preventDefault();
+          promptLink(e.currentTarget);
+          return;
+        }
         // Block bold/italic/underline shortcuts so contenteditable stays plain text
         if ((e.metaKey || e.ctrlKey) && ['b', 'i', 'u'].includes(e.key.toLowerCase())) {
           e.preventDefault();
@@ -3122,9 +3282,15 @@ function CoverLetterDocument({ cv, update }) {
           // A blank line still takes up a line inside the body's pre-wrap
           // text, but an empty element measures as zero — hence the no-break
           // space standing in for it here.
-          <div key={i} ref={el => { measureRefs.current[`b-${i}`] = el; }} style={LETTER_BODY_STYLE}>
-            {p || ' '}
-          </div>
+          //
+          // Linkified rather than raw, because `[my portfolio](bragi.dev)` is
+          // half again as wide as the "my portfolio" the page actually shows.
+          // Measured raw it would budget for lines the letter never draws and
+          // break the page early. This copy is React's alone — no
+          // contenteditable to fight over the children, so innerHTML here is
+          // safe where it isn't in Ed — and linkHtml escapes what goes in.
+          <div key={i} ref={el => { measureRefs.current[`b-${i}`] = el; }} style={LETTER_BODY_STYLE}
+            dangerouslySetInnerHTML={{ __html: linkHtml(p, true) || '&nbsp;' }} />
         ))}
         <div ref={el => { measureRefs.current['sign'] = el; }}>
           <LetterSignoff cv={cv} update={() => {}} ink={ink} />
