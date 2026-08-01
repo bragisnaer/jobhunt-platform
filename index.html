@@ -318,7 +318,7 @@
     .sync-banner { display: none !important; }
   }
 
-  /* Inspector panel (tweaks), in the gutter right of the document. */
+  /* Properties panel, in the gutter left of the document. */
   .tweaks-panel {
     position: fixed; z-index: 1000;
     top: 96px; left: var(--tw-left, auto); right: auto;
@@ -668,11 +668,6 @@
   .modal-foot button.primary:hover { background: #b05732; }
 
   /* Manage statuses modal contents */
-  .manage-statuses .row-header {
-    font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
-    color: #8a857a; font-weight: 600; padding: 8px 0 2px;
-  }
-  .manage-statuses .row-header:first-child { padding-top: 0; }
   .manage-statuses .status-rows {
     display: flex; flex-direction: column;
   }
@@ -1003,6 +998,10 @@ const V1_RULE = '#d8d4cb';
 const V1_FONT = "'Inter Tight', 'Helvetica Neue', Helvetica, Arial, sans-serif";
 const V1_MONO = 'ui-monospace, "SF Mono", Menlo, monospace';
 
+// Hover-reveal delete button shared by every inline entry (roles, education,
+// honours) across templates. Was pasted inline seven times.
+const DEL_BTN_STYLE = { flexShrink: 0, border: '1px solid #d8d4cb', background: '#fff', color: '#999', cursor: 'pointer', fontSize: 11, lineHeight: 1, width: 18, height: 18, padding: 0, borderRadius: 3, fontFamily: V1_MONO, opacity: 0, transition: 'opacity 120ms' };
+
 // Optional footer credit line. Off by default — nobody should feel obliged to
 // advertise the tool. When on, the whole line is free text (cv.creditText),
 // including any link; the default below is only a starting suggestion.
@@ -1073,20 +1072,27 @@ const STATUS_COLOR_PALETTE = [
   '#9aa1a6', '#2f6fb3', '#0e7a8a', '#1f7a3a', '#7a6b1a',
   '#a36b1a', '#7a3418', '#7a1f4a', '#5e3a8a', '#3a3a3a',
 ];
-function loadCustomStatuses() {
+// Single JSON localStorage codec — every key gets validation and an error
+// log for free. `pick` inspects the parsed value and returns what to keep,
+// or undefined to reject; rejects and storage errors both yield `fallback`.
+function loadJson(key, pick, fallback) {
   try {
-    const raw = localStorage.getItem(CUSTOM_STATUSES_KEY);
+    const raw = localStorage.getItem(key);
     if (raw) {
-      const v = JSON.parse(raw);
-      if (Array.isArray(v)) return v.filter(s => s && s.id && s.label && s.color);
+      const v = pick(JSON.parse(raw));
+      if (v !== undefined) return v;
     }
   } catch {}
-  return [];
+  return fallback;
 }
-function saveCustomStatuses(list) {
-  try { localStorage.setItem(CUSTOM_STATUSES_KEY, JSON.stringify(list)); }
-  catch (e) { console.warn('saveCustomStatuses failed', e); }
+function saveJson(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); }
+  catch (e) { console.warn(`saveJson(${key}) failed`, e); }
 }
+
+const loadCustomStatuses = () => loadJson(CUSTOM_STATUSES_KEY,
+  v => Array.isArray(v) ? v.filter(s => s && s.id && s.label && s.color) : undefined, []);
+const saveCustomStatuses = (list) => saveJson(CUSTOM_STATUSES_KEY, list);
 const StatusesContext = React.createContext({
   statuses: APP_STATUSES,
   byId: APP_STATUS_BY_ID,
@@ -1095,21 +1101,11 @@ const StatusesContext = React.createContext({
 // User-defined ordering of statuses (built-ins + customs) — array of ids.
 // When set, this overrides the default "built-ins then customs" order.
 const STATUS_ORDER_KEY = 'cv-status-order';
-function loadStatusOrder() {
-  try {
-    const raw = localStorage.getItem(STATUS_ORDER_KEY);
-    if (raw) {
-      const v = JSON.parse(raw);
-      if (Array.isArray(v) && v.every(x => typeof x === 'string')) return v;
-    }
-  } catch {}
-  return null;
-}
+const loadStatusOrder = () => loadJson(STATUS_ORDER_KEY,
+  v => Array.isArray(v) && v.every(x => typeof x === 'string') ? v : undefined, null);
 function saveStatusOrder(arr) {
-  try {
-    if (!arr) localStorage.removeItem(STATUS_ORDER_KEY);
-    else localStorage.setItem(STATUS_ORDER_KEY, JSON.stringify(arr));
-  } catch {}
+  if (!arr) { try { localStorage.removeItem(STATUS_ORDER_KEY); } catch {} return; }
+  saveJson(STATUS_ORDER_KEY, arr);
 }
 function combineStatuses(customStatuses, order) {
   const all = [...APP_STATUSES, ...customStatuses];
@@ -1134,17 +1130,17 @@ const LANG_LEVELS = [
 ];
 
 const SHAPES = [
-  { id: 'circle',  label: 'Circle',  clip: 'circle(50%)',           radius: 0,
+  { id: 'circle',  label: 'Circle',  clip: 'circle(50%)',
     icon: <circle cx="8" cy="8" r="7" /> },
-  { id: 'rounded', label: 'Rounded', clip: 'inset(0 round 14%)',    radius: 0,
+  { id: 'rounded', label: 'Rounded', clip: 'inset(0 round 14%)',
     icon: <rect x="1" y="1" width="14" height="14" rx="3" /> },
-  { id: 'square',  label: 'Square',  clip: 'inset(0)',              radius: 0,
+  { id: 'square',  label: 'Square',  clip: 'inset(0)',
     icon: <rect x="1" y="1" width="14" height="14" /> },
-  { id: 'arch',    label: 'Arch',    clip: 'inset(0 round 50% 50% 0 0 / 50% 50% 0 0)', radius: 0,
+  { id: 'arch',    label: 'Arch',    clip: 'inset(0 round 50% 50% 0 0 / 50% 50% 0 0)',
     icon: <path d="M1 15 V8 A7 7 0 0 1 15 8 V15 Z" /> },
-  { id: 'hexagon', label: 'Hexagon', clip: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)', radius: 0,
+  { id: 'hexagon', label: 'Hexagon', clip: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)',
     icon: <polygon points="8,1 15,5 15,11 8,15 1,11 1,5" /> },
-  { id: 'capsule', label: 'Capsule', clip: 'inset(0 round 50%)',    radius: 0,
+  { id: 'capsule', label: 'Capsule', clip: 'inset(0 round 50%)',
     icon: <rect x="1" y="3" width="14" height="10" rx="5" /> },
 ];
 
@@ -1206,7 +1202,9 @@ async function idbPut(key, value) {
       r.onsuccess = () => res();
       r.onerror = () => rej(r.error);
     });
-  } catch {}
+  // Swallowing this silently made headshot uploads look saved when quota or
+  // private-mode restrictions had dropped them — at least leave a trace.
+  } catch (e) { console.warn(`idbPut(${key}) failed`, e); }
 }
 async function idbDel(key) {
   try {
@@ -1217,97 +1215,16 @@ async function idbDel(key) {
       r.onsuccess = () => res();
       r.onerror = () => rej(r.error);
     });
-  } catch {}
+  } catch (e) { console.warn(`idbDel(${key}) failed`, e); }
 }
 
-// ── Named profile slots ─────────────────────────────────────────
+// ── v1 storage keys ─────────────────────────────────────────────
+// Only the keys and headshot key-shape survive from the pre-application
+// (profiles) era; runMigrationIfNeeded still reads them to migrate old data.
+// The v1 load/save layer itself is gone.
 const PROFILES_KEY = 'cv-profiles';
 const ACTIVE_KEY = 'cv-active';
 const DEFAULT_PROFILE = 'Base CV';
-const headshotKeyFor = (name) => `headshot:${name}`;
-
-function loadProfiles() {
-  try {
-    const raw = localStorage.getItem(PROFILES_KEY);
-    if (raw) {
-      const p = JSON.parse(raw);
-      if (p && typeof p === 'object' && Object.keys(p).length) return p;
-    }
-  } catch {}
-  return null;
-}
-function saveProfiles(p) {
-  try { localStorage.setItem(PROFILES_KEY, JSON.stringify(p)); } catch {}
-}
-function persistActive(name) {
-  try { localStorage.setItem(ACTIVE_KEY, name); } catch {}
-}
-function loadActive(profiles) {
-  const a = localStorage.getItem(ACTIVE_KEY);
-  if (a && profiles[a]) return a;
-  return Object.keys(profiles)[0];
-}
-// ── Job applications ────────────────────────────────────────────
-const APPS_KEY = 'cv-applications';
-const appHeadshotKeyFor = (id) => `app-headshot:${id}`;
-function loadApplications() {
-  try {
-    const raw = localStorage.getItem(APPS_KEY);
-    if (raw) {
-      const v = JSON.parse(raw);
-      if (Array.isArray(v)) return v;
-    }
-  } catch {}
-  return [];
-}
-function saveApplications(list) {
-  try { localStorage.setItem(APPS_KEY, JSON.stringify(list)); }
-  catch (e) { console.warn('saveApplications failed', e); }
-}
-async function createApplicationFromCurrent(cv, headshotSrc, activeProfile) {
-  const id = (typeof crypto !== 'undefined' && crypto.randomUUID)
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  let headshotKey = null;
-  if (headshotSrc) {
-    headshotKey = appHeadshotKeyFor(id);
-    await idbPut(headshotKey, headshotSrc);
-  }
-  const now = new Date().toISOString();
-  return {
-    id,
-    company: '',
-    role: cv.title || '',
-    postingUrl: '',
-    appliedDate: '',
-    status: 'drafting',
-    notes: '',
-    createdAt: now,
-    updatedAt: now,
-    sourceProfile: activeProfile,
-    snapshot: {
-      cv: JSON.parse(JSON.stringify(cv)),
-      headshotKey,
-    },
-  };
-}
-
-// Sync migration of cv-data → profiles. Headshot migration runs async on mount.
-function ensureProfiles() {
-  let profiles = loadProfiles();
-  if (!profiles) {
-    let cv = SEED_CV;
-    try {
-      const old = localStorage.getItem('cv-data');
-      if (old) cv = deepMerge(SEED_CV, JSON.parse(old));
-    } catch {}
-    profiles = { [DEFAULT_PROFILE]: { cv } };
-    saveProfiles(profiles);
-    persistActive(DEFAULT_PROFILE);
-    try { localStorage.removeItem('cv-data'); } catch {}
-  }
-  return profiles;
-}
 
 // ════════════════════════════════════════════════════════════════
 //  Schema v2: applications-as-unit
@@ -1331,34 +1248,12 @@ function genId() {
     : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function loadAppsMeta() {
-  try {
-    const raw = localStorage.getItem(APPS_META_KEY);
-    if (raw) {
-      const v = JSON.parse(raw);
-      if (Array.isArray(v)) return v;
-    }
-  } catch {}
-  return [];
-}
-function saveAppsMeta(list) {
-  try { localStorage.setItem(APPS_META_KEY, JSON.stringify(list)); }
-  catch (e) { console.warn('saveAppsMeta failed', e); }
-}
-function loadAppCv(id) {
-  try {
-    const raw = localStorage.getItem(appDataKeyFor(id));
-    if (raw) {
-      const v = JSON.parse(raw);
-      if (v && v.cv) return v.cv;
-    }
-  } catch {}
-  return null;
-}
-function saveAppCv(id, cv) {
-  try { localStorage.setItem(appDataKeyFor(id), JSON.stringify({ cv })); }
-  catch (e) { console.warn('saveAppCv failed', e); }
-}
+const loadAppsMeta = () => loadJson(APPS_META_KEY,
+  v => Array.isArray(v) ? v : undefined, []);
+const saveAppsMeta = (list) => saveJson(APPS_META_KEY, list);
+const loadAppCv = (id) => loadJson(appDataKeyFor(id),
+  v => (v && v.cv) ? v.cv : undefined, null);
+const saveAppCv = (id, cv) => saveJson(appDataKeyFor(id), { cv });
 function deleteAppCv(id) {
   try { localStorage.removeItem(appDataKeyFor(id)); } catch {}
 }
@@ -1442,7 +1337,7 @@ async function runMigrationIfNeeded() {
       const baseCv = deepMerge(SEED_CV, profiles[DEFAULT_PROFILE].cv);
       saveAppCv(id, baseCv);
       try {
-        const old = await idbGet(headshotKeyFor(DEFAULT_PROFILE));
+        const old = await idbGet(appHeadshotKeyV2(DEFAULT_PROFILE));
         if (old) await idbPut(appHeadshotKeyV2(id), old);
       } catch {}
       newApps.push(makeAppMeta({
@@ -1463,7 +1358,7 @@ async function runMigrationIfNeeded() {
       saveAppCv(id, cv);
       try {
         let bytes = null;
-        if (a.sourceProfile) bytes = await idbGet(headshotKeyFor(a.sourceProfile));
+        if (a.sourceProfile) bytes = await idbGet(appHeadshotKeyV2(a.sourceProfile));
         if (!bytes && a.snapshot && a.snapshot.headshotKey) bytes = await idbGet(a.snapshot.headshotKey);
         if (bytes) await idbPut(appHeadshotKeyV2(id), bytes);
       } catch {}
@@ -1489,7 +1384,7 @@ async function runMigrationIfNeeded() {
       const cv = deepMerge(SEED_CV, profiles[name].cv);
       saveAppCv(id, cv);
       try {
-        const bytes = await idbGet(headshotKeyFor(name));
+        const bytes = await idbGet(appHeadshotKeyV2(name));
         if (bytes) await idbPut(appHeadshotKeyV2(id), bytes);
       } catch {}
       newApps.push(makeAppMeta({
@@ -1838,9 +1733,13 @@ function usePanelDrag({ width, handleH = 40 }) {
     const up = () => { start.current = null; setDragging(false); };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    // pointercancel: without it, releasing outside the window (or an OS
+    // gesture stealing the pointer) left the panel glued to the cursor.
+    window.addEventListener('pointercancel', up);
     return () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
     };
   }, [dragging, width, handleH]);
   // base is where the panel currently sits, in whichever coord space it uses.
@@ -1960,13 +1859,23 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
     apply({ ...t, scale: val, x: cx - imgX * val, y: cy - imgY * val });
   };
 
-  // Frame resize handle
+  // Frame resize handle. The window listeners are handed a cleanup closure so
+  // the same render generation that attached them always detaches them — and
+  // the unmount effect below drops them if the editor dies mid-drag (e.g. the
+  // user switches document while resizing), which used to leak the listeners.
   const resizeState = React.useRef(null);
   const onResizeDown = (e) => {
     e.preventDefault(); e.stopPropagation();
-    resizeState.current = { startX: e.clientX, startY: e.clientY, oSize: t.size };
+    const cleanup = () => {
+      resizeState.current = null;
+      window.removeEventListener('pointermove', onResizeMove);
+      window.removeEventListener('pointerup', onResizeUp);
+      window.removeEventListener('pointercancel', onResizeUp);
+    };
+    resizeState.current = { startX: e.clientX, startY: e.clientY, oSize: t.size, cleanup };
     window.addEventListener('pointermove', onResizeMove);
     window.addEventListener('pointerup', onResizeUp);
+    window.addEventListener('pointercancel', onResizeUp);
   };
   const onResizeMove = (e) => {
     if (!resizeState.current) return;
@@ -1975,10 +1884,11 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
     apply({ ...t, size: next });
   };
   const onResizeUp = () => {
-    resizeState.current = null;
-    window.removeEventListener('pointermove', onResizeMove);
-    window.removeEventListener('pointerup', onResizeUp);
+    if (resizeState.current) resizeState.current.cleanup();
   };
+  React.useEffect(() => () => {
+    if (resizeState.current) resizeState.current.cleanup();
+  }, []);
 
   // Recenter button
   const onRecenter = () => {
@@ -2241,7 +2151,7 @@ function BulletBtn({ label, onClick, disabled, title }) {
   );
 }
 
-function V1Role({ role, onRole, onDelete, last, ink, bulletAttr, flowRoleId, flowStartIdx = 0, companyLocation }) {
+function V1Role({ role, onRole, onDelete, last, ink, flowRoleId, companyLocation }) {
   const editable = !!window.__EDIT_ON;
   const setBullet = (i, v) => {
     const next = role.bullets.slice();
@@ -2270,7 +2180,7 @@ function V1Role({ role, onRole, onDelete, last, ink, bulletAttr, flowRoleId, flo
         {editable && onDelete && (
           <button type="button" className="screen-only role-del" onClick={(e) => { e.stopPropagation(); if (confirm('Delete this role and all its bullets?')) onDelete(); }}
             title="Delete role"
-            style={{ flexShrink: 0, border: '1px solid #d8d4cb', background: '#fff', color: '#999', cursor: 'pointer', fontSize: 11, lineHeight: 1, width: 18, height: 18, padding: 0, borderRadius: 3, fontFamily: V1_MONO, opacity: 0, transition: 'opacity 120ms' }}>×</button>
+            style={DEL_BTN_STYLE}>×</button>
         )}
       </div>
       {(role.location || companyLocation || editable) && (
@@ -2280,8 +2190,7 @@ function V1Role({ role, onRole, onDelete, last, ink, bulletAttr, flowRoleId, flo
       <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 5 }}>
         {role.bullets.map((b, i) => (
           <li key={i}
-            {...(bulletAttr ? { [bulletAttr]: '' } : {})}
-            {...(flowRoleId != null ? { 'data-flow-role': flowRoleId, 'data-flow-idx': flowStartIdx + i } : {})}
+            {...(flowRoleId != null ? { 'data-flow-role': flowRoleId } : {})}
             style={{ fontSize: 10.25, lineHeight: 1.5, paddingLeft: 14, position: 'relative', color: V1_INK_SOFT, textWrap: 'pretty' }}>
             <span style={{ position: 'absolute', left: 0, top: 7, width: 6, height: 1, background: ink }} />
             <Ed value={b} onChange={(v) => setBullet(i, v)} multiline />
@@ -2320,6 +2229,49 @@ function RowDelete({ items, i, setData }) {
   return <button className="screen-only" onClick={(e) => { e.stopPropagation(); setData(items.filter((_, j) => j !== i)); }}
     style={{ flexShrink: 0, border: 'none', background: 'transparent', color: '#bbb', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 4px', fontFamily: V1_FONT, opacity: 0.6 }}
     title="Remove" onMouseEnter={(e) => e.currentTarget.style.opacity = 1} onMouseLeave={(e) => e.currentTarget.style.opacity = 0.6}>×</button>;
+}
+
+// One education / honour entry, shared by the Editorial and Linear templates —
+// they used to render pixel-identical inline copies. `style` carries the only
+// per-template difference (Editorial's between-entry margin).
+function EducationEntry({ e, i, cv, update, ink, editable, style }) {
+  return (
+    <div className="role-block" style={{ position: 'relative', ...style }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+        <Ed value={e.degree} onChange={(v) => update(['education', i, 'degree'], v)} style={{ fontSize: 11.5, fontWeight: 600, color: ink, letterSpacing: -0.1, flex: 1 }} />
+        <Ed value={e.dates} onChange={(v) => update(['education', i, 'dates'], v)} style={{ fontSize: 9, color: V1_MUTED, fontFamily: V1_MONO }} />
+        {editable && (
+          <button type="button" className="screen-only role-del"
+            onClick={() => { if (confirm('Delete this education entry?')) { const next = cv.education.slice(); next.splice(i, 1); update(['education'], next); } }}
+            title="Delete entry"
+            style={DEL_BTN_STYLE}>×</button>
+        )}
+      </div>
+      <div style={{ fontSize: 10, color: V1_INK_SOFT, marginTop: 2 }}>
+        <Ed value={e.spec} onChange={(v) => update(['education', i, 'spec'], v)} /> · <span style={{ color: V1_MUTED }}>
+          <Ed value={e.school} onChange={(v) => update(['education', i, 'school'], v)} />, <Ed value={e.location} onChange={(v) => update(['education', i, 'location'], v)} />
+        </span>
+      </div>
+      <Ed tag="div" value={e.note} onChange={(v) => update(['education', i, 'note'], v)} multiline style={{ fontSize: 10, color: V1_MUTED, lineHeight: 1.5, marginTop: 5, textWrap: 'pretty' }} />
+    </div>
+  );
+}
+function HonourEntry({ h, i, cv, update, ink, editable, style }) {
+  return (
+    <div className="role-block" style={{ position: 'relative', ...style }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+        <Ed value={h.title} onChange={(v) => update(['honours', i, 'title'], v)} style={{ fontSize: 11.5, fontWeight: 600, color: ink, letterSpacing: -0.1, flex: 1 }} />
+        <Ed value={h.years} onChange={(v) => update(['honours', i, 'years'], v)} style={{ fontSize: 9, color: V1_MUTED, fontFamily: V1_MONO }} />
+        {editable && (
+          <button type="button" className="screen-only role-del"
+            onClick={() => { if (confirm('Delete this honour?')) { const next = (cv.honours || []).slice(); next.splice(i, 1); update(['honours'], next); } }}
+            title="Delete honour"
+            style={DEL_BTN_STYLE}>×</button>
+        )}
+      </div>
+      <Ed tag="div" value={h.text} onChange={(v) => update(['honours', i, 'text'], v)} multiline style={{ fontSize: 10, color: V1_INK_SOFT, lineHeight: 1.5, marginTop: 5, textWrap: 'pretty' }} />
+    </div>
+  );
 }
 
 function renderSidebarSection(meta, cv, update, ink) {
@@ -2413,12 +2365,17 @@ function useSidebarSplit(visibleIds, availableP1, refs) {
   return splitIdx;
 }
 
-function V1Sidebar({ cv, update, page, splitIdx, measureRefs, ink, side, headshotSrc, onHeadshotSrc, onHeadshotTransform, onHeadshotClear }) {
-  const order = ensureSectionOrder(cv);
+// The visible sidebar sections, in cv.sectionOrder order, as their metadata
+// entries. Was derived inline identically in three components.
+function visibleSidebarSections(cv) {
   const sidebarMetaById = Object.fromEntries((cv.sidebar || []).map(m => [m.id, m]));
-  const visible = order
+  return ensureSectionOrder(cv)
     .filter(s => s.visible && !isMainSectionId(s.id) && sidebarMetaById[s.id])
     .map(s => sidebarMetaById[s.id]);
+}
+
+function V1Sidebar({ cv, update, page, splitIdx, ink, side, headshotSrc, onHeadshotSrc, onHeadshotTransform, onHeadshotClear }) {
+  const visible = visibleSidebarSections(cv);
   const list = page === 1 ? visible.slice(0, splitIdx) : visible.slice(splitIdx);
   return (
     <aside style={{
@@ -2445,7 +2402,7 @@ function V1Sidebar({ cv, update, page, splitIdx, measureRefs, ink, side, headsho
         </div>
       </>}
       {list.map(meta => (
-        <div key={meta.id} ref={el => { if (measureRefs) measureRefs.current[meta.id] = el; }}>
+        <div key={meta.id}>
           {renderSidebarSection(meta, cv, update, ink)}
         </div>
       ))}
@@ -2454,11 +2411,7 @@ function V1Sidebar({ cv, update, page, splitIdx, measureRefs, ink, side, headsho
 }
 
 function MeasurementSidebar({ cv, update, measureRefs, ink, side }) {
-  const order = ensureSectionOrder(cv);
-  const sidebarMetaById = Object.fromEntries((cv.sidebar || []).map(m => [m.id, m]));
-  const visible = order
-    .filter(s => s.visible && !isMainSectionId(s.id) && sidebarMetaById[s.id])
-    .map(s => sidebarMetaById[s.id]);
+  const visible = visibleSidebarSections(cv);
   return (
     <aside aria-hidden style={{
       position: 'absolute', top: 0, left: -9999, width: 240,
@@ -2548,24 +2501,8 @@ function renderEditorialMainSection(id, cv, update, ink) {
       <V1Section key="education-main" title={titles.education || 'Education'}
         onTitleChange={(v) => update(['sectionTitles', 'education'], v)} ink={ink}>
         {(cv.education || []).map((e, i) => (
-          <div key={i} className="role-block" style={{ marginBottom: i === cv.education.length - 1 ? 0 : 10, position: 'relative' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-              <Ed value={e.degree} onChange={(v) => update(['education', i, 'degree'], v)} style={{ fontSize: 11.5, fontWeight: 600, color: ink, letterSpacing: -0.1, flex: 1 }} />
-              <Ed value={e.dates} onChange={(v) => update(['education', i, 'dates'], v)} style={{ fontSize: 9, color: V1_MUTED, fontFamily: V1_MONO }} />
-              {editable && (
-                <button type="button" className="screen-only role-del"
-                  onClick={() => { if (confirm('Delete this education entry?')) { const next = cv.education.slice(); next.splice(i, 1); update(['education'], next); } }}
-                  title="Delete entry"
-                  style={{ flexShrink: 0, border: '1px solid #d8d4cb', background: '#fff', color: '#999', cursor: 'pointer', fontSize: 11, lineHeight: 1, width: 18, height: 18, padding: 0, borderRadius: 3, fontFamily: V1_MONO, opacity: 0, transition: 'opacity 120ms' }}>×</button>
-              )}
-            </div>
-            <div style={{ fontSize: 10, color: V1_INK_SOFT, marginTop: 2 }}>
-              <Ed value={e.spec} onChange={(v) => update(['education', i, 'spec'], v)} /> · <span style={{ color: V1_MUTED }}>
-                <Ed value={e.school} onChange={(v) => update(['education', i, 'school'], v)} />, <Ed value={e.location} onChange={(v) => update(['education', i, 'location'], v)} />
-              </span>
-            </div>
-            <Ed tag="div" value={e.note} onChange={(v) => update(['education', i, 'note'], v)} multiline style={{ fontSize: 10, color: V1_MUTED, lineHeight: 1.5, marginTop: 5, textWrap: 'pretty' }} />
-          </div>
+          <EducationEntry key={i} e={e} i={i} cv={cv} update={update} ink={ink} editable={editable}
+            style={{ marginBottom: i === cv.education.length - 1 ? 0 : 10 }} />
         ))}
         {editable && (
           <button type="button" className="add-link screen-only" onClick={() => update(['education'], [...cv.education, { degree: 'New degree', spec: '', school: '', location: '', dates: '', note: '' }])}>+ add education</button>
@@ -2578,19 +2515,8 @@ function renderEditorialMainSection(id, cv, update, ink) {
       <V1Section key="honours-main" title={titles.honours || 'Honours and Achievements'}
         onTitleChange={(v) => update(['sectionTitles', 'honours'], v)} ink={ink}>
         {(cv.honours || []).map((h, i) => (
-          <div key={i} className="role-block" style={{ marginBottom: i === (cv.honours || []).length - 1 ? 0 : 10, position: 'relative' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-              <Ed value={h.title} onChange={(v) => update(['honours', i, 'title'], v)} style={{ fontSize: 11.5, fontWeight: 600, color: ink, letterSpacing: -0.1, flex: 1 }} />
-              <Ed value={h.years} onChange={(v) => update(['honours', i, 'years'], v)} style={{ fontSize: 9, color: V1_MUTED, fontFamily: V1_MONO }} />
-              {editable && (
-                <button type="button" className="screen-only role-del"
-                  onClick={() => { if (confirm('Delete this honour?')) { const next = (cv.honours || []).slice(); next.splice(i, 1); update(['honours'], next); } }}
-                  title="Delete honour"
-                  style={{ flexShrink: 0, border: '1px solid #d8d4cb', background: '#fff', color: '#999', cursor: 'pointer', fontSize: 11, lineHeight: 1, width: 18, height: 18, padding: 0, borderRadius: 3, fontFamily: V1_MONO, opacity: 0, transition: 'opacity 120ms' }}>×</button>
-              )}
-            </div>
-            <Ed tag="div" value={h.text} onChange={(v) => update(['honours', i, 'text'], v)} multiline style={{ fontSize: 10, color: V1_INK_SOFT, lineHeight: 1.5, marginTop: 5, textWrap: 'pretty' }} />
-          </div>
+          <HonourEntry key={i} h={h} i={i} cv={cv} update={update} ink={ink} editable={editable}
+            style={{ marginBottom: i === (cv.honours || []).length - 1 ? 0 : 10 }} />
         ))}
         {editable && (
           <button type="button" className="add-link screen-only" onClick={() => update(['honours'], [...(cv.honours || []), { title: 'New honour', years: '', text: '' }])}>+ add honour</button>
@@ -2616,7 +2542,7 @@ function V1MainP1({ cv, update, ink, ppmSplitIdx, omSplitIdx }) {
   // If Experience is hidden, P1 renders ALL visible sections (P2 will be skipped).
   const sectionsToRender = expVisible ? sectionsBeforeExp : mainOrder;
   return (
-    <div style={{ flex: 1, padding: '42px 44px 32px', fontFamily: V1_FONT, boxSizing: 'border-box' }} data-p1-main>
+    <div style={{ flex: 1, padding: '42px 44px 32px', fontFamily: V1_FONT, boxSizing: 'border-box' }}>
       <header style={{ marginBottom: 20 }}>
         <Ed tag="h1" value={cv.name} onChange={(v) => update(['name'], v)}
           style={{ fontFamily: V1_FONT, fontSize: 40, fontWeight: 600, letterSpacing: -1.3, margin: 0, lineHeight: 1, color: ink, textWrap: 'balance', display: 'block' }} />
@@ -2759,7 +2685,7 @@ function V1MainP2({ cv, update, ink, ppmSplitIdx, omSplitIdx }) {
                   <button type="button" className="screen-only company-del"
                     onClick={() => { if (confirm(`Delete company "${co.company}" and all its roles?`)) deleteCompany(realCi); }}
                     title="Delete company"
-                    style={{ flexShrink: 0, border: '1px solid #d8d4cb', background: '#fff', color: '#999', cursor: 'pointer', fontSize: 11, lineHeight: 1, width: 18, height: 18, padding: 0, borderRadius: 3, fontFamily: V1_MONO, opacity: 0, transition: 'opacity 120ms' }}>×</button>
+                    style={DEL_BTN_STYLE}>×</button>
                 )}
               </div>
               <div style={{ marginTop: 8 }}>
@@ -3000,12 +2926,7 @@ function EditorialTemplate({ cv, update, headshotSrc, onHeadshotSrc, onHeadshotT
 
   const AVAIL_P1 = 700;
   const measureRefs = React.useRef({});
-  // Sidebar visible-ids + order driven by cv.sectionOrder (filter to sidebar items only).
-  const sectionOrderForSidebar = ensureSectionOrder(cv);
-  const sidebarMetaById = Object.fromEntries((cv.sidebar || []).map(m => [m.id, m]));
-  const visibleIds = sectionOrderForSidebar
-    .filter(s => s.visible && !isMainSectionId(s.id) && sidebarMetaById[s.id])
-    .map(s => s.id);
+  const visibleIds = visibleSidebarSections(cv).map(m => m.id);
   const splitIdx = useSidebarSplit(visibleIds, AVAIL_P1, measureRefs);
 
   const ppm = cv.experience[0] && cv.experience[0].roles[0];
@@ -3020,18 +2941,23 @@ function EditorialTemplate({ cv, update, headshotSrc, onHeadshotSrc, onHeadshotT
     const PAGE_H = A4_H, BOTTOM_PAD = 32;
     const limit = PAGE_H - BOTTOM_PAD;
     const rootTop = root.getBoundingClientRect().top;
+    // The measure copy lives inside .cv-stage, which is scaled with CSS
+    // `zoom`, and getBoundingClientRect returns zoom-scaled coordinates while
+    // `limit` is in unscaled A4 pixels. Unzoomed the factor is 1; at 150% the
+    // raw compare pushed fitting bullets onto page 2, at 50% page 1 clipped.
+    const stage = root.closest('.cv-stage');
+    const zoomFactor = (stage && parseFloat(stage.style.zoom)) || 1;
+    const bottomOf = (el) => (el.getBoundingClientRect().bottom - rootTop) / zoomFactor;
     const ppmLis = root.querySelectorAll('li[data-flow-role="ppm"]');
     const omLis = root.querySelectorAll('li[data-flow-role="om"]');
     let ppmFit = ppm.bullets.length, omFit = om ? om.bullets.length : 0, overflowed = false;
     for (let i = 0; i < ppmLis.length; i++) {
-      const r = ppmLis[i].getBoundingClientRect();
-      if (r.bottom - rootTop > limit) { ppmFit = i; overflowed = true; break; }
+      if (bottomOf(ppmLis[i]) > limit) { ppmFit = i; overflowed = true; break; }
     }
     if (overflowed) { omFit = 0; }
     else if (om) {
       for (let i = 0; i < omLis.length; i++) {
-        const r = omLis[i].getBoundingClientRect();
-        if (r.bottom - rootTop > limit) { omFit = i; break; }
+        if (bottomOf(omLis[i]) > limit) { omFit = i; break; }
       }
     }
     if (ppmFit !== ppmSplitIdx) setPpmSplitIdx(ppmFit);
@@ -3103,7 +3029,6 @@ function LinearTemplate({ cv, update, headshotSrc, onHeadshotSrc, onHeadshotTran
   const side = (cv.theme && cv.theme.side) || '#f4efe6';
   const titles = cv.sectionTitles || {};
   const editable = !!window.__EDIT_ON;
-  const visible = (cv.sidebar || []).filter(s => s.visible);
   const pageStyle = { '--cv-ink': ink, '--cv-side': side };
   const credit = creditFor(cv, LINEAR_PADDING_X, LINEAR_PADDING_X);
 
@@ -3183,47 +3108,17 @@ function LinearTemplate({ cv, update, headshotSrc, onHeadshotSrc, onHeadshotTran
           <button type="button" className="screen-only company-del"
             onClick={() => { if (confirm(`Delete company "${co.company}" and all its roles?`)) deleteCompany(ci); }}
             title="Delete company"
-            style={{ flexShrink: 0, border: '1px solid #d8d4cb', background: '#fff', color: '#999', cursor: 'pointer', fontSize: 11, lineHeight: 1, width: 18, height: 18, padding: 0, borderRadius: 3, fontFamily: V1_MONO, opacity: 0, transition: 'opacity 120ms' }}>×</button>
+            style={DEL_BTN_STYLE}>×</button>
         )}
       </div>
     </div>
   );
 
   const renderEducationEntry = (e, i) => (
-    <div className="role-block" style={{ position: 'relative' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-        <Ed value={e.degree} onChange={(v) => update(['education', i, 'degree'], v)} style={{ fontSize: 11.5, fontWeight: 600, color: ink, letterSpacing: -0.1, flex: 1 }} />
-        <Ed value={e.dates} onChange={(v) => update(['education', i, 'dates'], v)} style={{ fontSize: 9, color: V1_MUTED, fontFamily: V1_MONO }} />
-        {editable && (
-          <button type="button" className="screen-only role-del"
-            onClick={() => { if (confirm('Delete this education entry?')) { const next = cv.education.slice(); next.splice(i, 1); update(['education'], next); } }}
-            title="Delete entry"
-            style={{ flexShrink: 0, border: '1px solid #d8d4cb', background: '#fff', color: '#999', cursor: 'pointer', fontSize: 11, lineHeight: 1, width: 18, height: 18, padding: 0, borderRadius: 3, fontFamily: V1_MONO, opacity: 0, transition: 'opacity 120ms' }}>×</button>
-        )}
-      </div>
-      <div style={{ fontSize: 10, color: V1_INK_SOFT, marginTop: 2 }}>
-        <Ed value={e.spec} onChange={(v) => update(['education', i, 'spec'], v)} /> · <span style={{ color: V1_MUTED }}>
-          <Ed value={e.school} onChange={(v) => update(['education', i, 'school'], v)} />, <Ed value={e.location} onChange={(v) => update(['education', i, 'location'], v)} />
-        </span>
-      </div>
-      <Ed tag="div" value={e.note} onChange={(v) => update(['education', i, 'note'], v)} multiline style={{ fontSize: 10, color: V1_MUTED, lineHeight: 1.5, marginTop: 5, textWrap: 'pretty' }} />
-    </div>
+    <EducationEntry e={e} i={i} cv={cv} update={update} ink={ink} editable={editable} />
   );
-
   const renderHonourEntry = (h, i) => (
-    <div className="role-block" style={{ position: 'relative' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-        <Ed value={h.title} onChange={(v) => update(['honours', i, 'title'], v)} style={{ fontSize: 11.5, fontWeight: 600, color: ink, letterSpacing: -0.1, flex: 1 }} />
-        <Ed value={h.years} onChange={(v) => update(['honours', i, 'years'], v)} style={{ fontSize: 9, color: V1_MUTED, fontFamily: V1_MONO }} />
-        {editable && (
-          <button type="button" className="screen-only role-del"
-            onClick={() => { if (confirm('Delete this honour?')) { const next = (cv.honours || []).slice(); next.splice(i, 1); update(['honours'], next); } }}
-            title="Delete honour"
-            style={{ flexShrink: 0, border: '1px solid #d8d4cb', background: '#fff', color: '#999', cursor: 'pointer', fontSize: 11, lineHeight: 1, width: 18, height: 18, padding: 0, borderRadius: 3, fontFamily: V1_MONO, opacity: 0, transition: 'opacity 120ms' }}>×</button>
-        )}
-      </div>
-      <Ed tag="div" value={h.text} onChange={(v) => update(['honours', i, 'text'], v)} multiline style={{ fontSize: 10, color: V1_INK_SOFT, lineHeight: 1.5, marginTop: 5, textWrap: 'pretty' }} />
-    </div>
+    <HonourEntry h={h} i={i} cv={cv} update={update} ink={ink} editable={editable} />
   );
 
   // Build atoms list, driven by cv.sectionOrder. Each visible section dispatches
@@ -3398,7 +3293,7 @@ function LinearTemplate({ cv, update, headshotSrc, onHeadshotSrc, onHeadshotTran
           <React.Fragment key={pi}>
             {pi > 0 && <PageBreakMarker index={pi - 1} />}
             <CVPage style={pageStyle} credit={credit}>
-              <div className="linear-body" style={{
+              <div style={{
                 padding: `${LINEAR_PADDING_TOP}px ${LINEAR_PADDING_X}px ${LINEAR_PADDING_BOTTOM}px`,
                 height: '100%', boxSizing: 'border-box',
                 fontFamily: V1_FONT, color: V1_INK_SOFT, overflow: 'hidden',
@@ -3504,10 +3399,10 @@ function TemplateWireframe({ templateId, size = 'sm' }) {
 //  Toolbar + Tweaks
 // ════════════════════════════════════════════════════════════════
 function Toolbar({ editOn, setEditOn, onPrint, onExport, onImport,
-                   doc, setDoc, appsCount = 0, zoom = 1, setZoom,
+                   doc, setDoc, zoom = 1, setZoom,
                    syncState = 'unsupported', syncDirName = '',
                    onSetUpSync, onReconnectSync, onUnbindSync,
-                   viewingSnapshot = false }) {
+                   }) {
   const fileRef = React.useRef(null);
   const docBtn = (id, label) => (
     <button onClick={() => setDoc(id)}
@@ -3652,8 +3547,8 @@ function TweaksPanel({ editOn, cv, update, headshotSrc,
   if (collapsed) {
     return (
       <button type="button" className="panel-reopen tweaks-reopen"
-        onClick={toggleCollapsed} title="Show tweaks">
-        <span>Tweaks</span>
+        onClick={toggleCollapsed} title="Show properties">
+        <span>Properties</span>
         <span className="chev">▸</span>
       </button>
     );
@@ -3728,13 +3623,13 @@ function TweaksPanel({ editOn, cv, update, headshotSrc,
     <div className="tweaks-panel" ref={panelRef}
       style={dragPos ? { left: dragPos.left, top: dragPos.top, right: 'auto', bottom: 'auto' } : undefined}>
       <div className="tweaks-head" onPointerDown={onHeadDown} title="Drag to move this panel">
-        <span>Tweaks</span>
+        <span>Properties</span>
         <span className="tweaks-head-actions">
           {dragPos && (
             <button type="button" onClick={() => setDragPos(null)}
-              title="Snap back to the corner">⟲</button>
+              title="Snap back beside the document">⟲</button>
           )}
-          <button type="button" onClick={toggleCollapsed} title="Hide tweaks">×</button>
+          <button type="button" onClick={toggleCollapsed} title="Hide properties">×</button>
         </span>
       </div>
       <div className="tweaks-body" ref={bodyRef}>
@@ -3870,15 +3765,15 @@ function ApplicationStatusSelect({ value, onChange }) {
   );
 }
 
-function OverflowChip({ statuses, selectedCount, totalCount, statusFilters, onToggle, onManage }) {
-  const [open, setOpen] = React.useState(false);
-  const rootRef = React.useRef(null);
+// Close an open popover on outside click or Escape. Was pasted inline in
+// three components (one copy had drifted and lost the Escape handler).
+function useClickOutside(ref, open, close) {
   React.useEffect(() => {
     if (!open) return;
     const onDocClick = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target)) close();
     };
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
     document.addEventListener('mousedown', onDocClick);
     document.addEventListener('keydown', onKey);
     return () => {
@@ -3886,6 +3781,12 @@ function OverflowChip({ statuses, selectedCount, totalCount, statusFilters, onTo
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
+}
+
+function OverflowChip({ statuses, selectedCount, totalCount, statusFilters, onToggle, onManage }) {
+  const [open, setOpen] = React.useState(false);
+  const rootRef = React.useRef(null);
+  useClickOutside(rootRef, open, () => setOpen(false));
   const active = selectedCount > 0;
   return (
     <div className="chip-overflow" ref={rootRef}>
@@ -4020,19 +3921,7 @@ function ManageStatusesModal({ allStatuses, customStatuses, setCustomStatuses, s
 function ColorSwatchPicker({ value, onChange }) {
   const [open, setOpen] = React.useState(false);
   const rootRef = React.useRef(null);
-  React.useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
-    };
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
-    document.addEventListener('mousedown', onDocClick);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDocClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
+  useClickOutside(rootRef, open, () => setOpen(false));
   return (
     <div className="swatch-picker" ref={rootRef}>
       <button type="button" className="swatch-trigger" style={{ background: value }}
@@ -4149,19 +4038,19 @@ function NewApplicationForm({ apps, defaultForkId, onCancel, onSubmit }) {
   const [position, setPosition] = React.useState('');
   const [forkFromId, setForkFromId] = React.useState(defaultForkId || (apps[0] && apps[0].id) || '');
   // Default template = template of the fork source. Updates when fork source changes.
+  // Memoised: loadAppCv parses the source's full CV out of localStorage, and this
+  // component re-renders on every keystroke in the Company/Position fields.
   const forkSource = apps.find(a => a.id === forkFromId);
-  const inheritedTemplateId = resolveTemplateId(forkSource && loadAppCv(forkSource.id) && loadAppCv(forkSource.id).templateId);
+  const inheritedTemplateId = React.useMemo(() => {
+    const srcCv = forkSource && loadAppCv(forkSource.id);
+    return resolveTemplateId(srcCv && srcCv.templateId);
+  }, [forkFromId]);
   const [templateId, setTemplateId] = React.useState(inheritedTemplateId);
   const [templateOpen, setTemplateOpen] = React.useState(false);
   const templateRef = React.useRef(null);
   React.useEffect(() => { setTemplateId(inheritedTemplateId); /* re-inherit when source changes */ // eslint-disable-next-line
   }, [forkFromId]);
-  React.useEffect(() => {
-    if (!templateOpen) return;
-    const onDocClick = (e) => { if (templateRef.current && !templateRef.current.contains(e.target)) setTemplateOpen(false); };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, [templateOpen]);
+  useClickOutside(templateRef, templateOpen, () => setTemplateOpen(false));
   const bases = apps.filter(a => a.isBase);
   const others = apps.filter(a => !a.isBase);
   const submit = (e) => {
@@ -4517,12 +4406,11 @@ function App() {
       const page = document.querySelector('.cv-page');
       if (!page) return;
       const r = page.getBoundingClientRect();
-      // The stage centres the page, so left + right spans the usable width,
-      // excluding any reserved scrollbar gutter.
-      const usable = r.left + r.right;
       const GAP = 16, EDGE = 8, TW_W = 280;
+      // Properties panel sits in the gutter LEFT of the document; clamp to the
+      // screen edge when the window is too narrow for a full gutter.
       root.style.setProperty('--tw-left',
-        `${Math.round(Math.min(usable - TW_W - EDGE, r.right + GAP))}px`);
+        `${Math.round(Math.max(EDGE, r.left - TW_W - GAP))}px`);
     };
     setEdges();
     window.addEventListener('resize', setEdges);
@@ -5026,11 +4914,10 @@ function App() {
     <HeadshotPanelContext.Provider value={hsPanelCtx}>
       <Toolbar editOn={editOn} setEditOn={setEditOn}
         onPrint={onPrint} onExport={onExport} onImport={onImport}
-        doc={doc} setDoc={setDoc} appsCount={apps.length}
+        doc={doc} setDoc={setDoc}
         zoom={zoom} setZoom={(v) => setZoom(clampZoom(v))}
         syncState={syncState} syncDirName={syncDirName}
-        onSetUpSync={onSetUpSync} onReconnectSync={onReconnectSync} onUnbindSync={onUnbindSync}
-        viewingSnapshot={!!viewingSnapshot} />
+        onSetUpSync={onSetUpSync} onReconnectSync={onReconnectSync} onUnbindSync={onUnbindSync} />
       {syncState === 'idle' && !syncBannerDismissed && (
         <div className="sync-banner">
           <span>Your data lives in this browser only. Bind it to a folder to sync across devices.</span>
