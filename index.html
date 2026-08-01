@@ -1017,13 +1017,61 @@ const DEL_BTN_STYLE = { flexShrink: 0, border: '1px solid #d8d4cb', background: 
 // advertise the tool. When on, the whole line is free text (cv.creditText),
 // including any link; the default below is only a starting suggestion.
 const CREDIT_TEXT_DEFAULT = 'Built and typeset in JobHunt Platform, a single-file CV editor · github.com/bragisnaer/jobhunt-platform';
-// Anything domain-shaped in the line becomes a real anchor, so a URL the user
-// typed stays clickable in the exported PDF. Non-global on purpose: String.split
-// splits on every match regardless, and .test() on a /g regex is stateful.
-const CREDIT_LINK_RE = /((?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s]*)?)/i;
 const creditFor = (cv, left, right) => cv.showCredit
   ? { left, right, text: (cv.creditText || '').trim() || CREDIT_TEXT_DEFAULT }
   : null;
+
+// ── Auto-linking ────────────────────────────────────────────────
+// Anything URL- or email-shaped becomes a real <a>, so a link the user typed
+// stays clickable in the printed PDF. Nothing is stored but plain text — the
+// anchors are rendered, never saved, so there is no markup to sanitise.
+//
+// strict mode (the default, used inside prose like the cover letter body)
+// additionally requires a known TLD, so "Node.js" and "index.html" stay text.
+// Contact-shaped fields — the footer credit, the letter's sender block — pass
+// strict: false, because there the whole value is deliberately a link.
+const AUTO_LINK_RE = /([a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+|(?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s]*)?)/gi;
+const AUTO_LINK_TLD_RE = /^(com|org|net|io|co|ai|app|dev|me|xyz|info|blog|page|site|online|cloud|digital|tech|design|studio|works|edu|gov|mil|int|dk|se|no|fi|is|uk|ie|de|nl|be|fr|es|it|pt|ch|at|pl|cz|eu|ca|us|au|nz|jp|cn|in|br|za)$/i;
+const AUTO_LINK_TRAIL_RE = /[.,;:!?)\]}'"]+$/;
+const linkHref = (token) => {
+  if (/^https?:\/\//i.test(token)) return token;
+  if (token.includes('@')) return `mailto:${token}`;
+  return `https://${token}`;
+};
+// Splits free text into [{ text, href }] runs; href is null for plain runs.
+function splitLinks(text, strict = true) {
+  const src = String(text ?? '');
+  const out = [];
+  const re = new RegExp(AUTO_LINK_RE.source, 'gi'); // fresh regex: lastIndex is stateful
+  let last = 0, m;
+  while ((m = re.exec(src)) !== null) {
+    let token = m[0];
+    // Sentence punctuation trailing a link belongs to the sentence, not the URL.
+    const trail = token.match(AUTO_LINK_TRAIL_RE);
+    if (trail) token = token.slice(0, -trail[0].length);
+    const isEmail = token.includes('@');
+    const host = token.replace(/^https?:\/\//i, '').split(/[/?#]/)[0];
+    const tld = host.split('.').pop();
+    const ok = token && (!strict || isEmail || /^https?:\/\//i.test(token) || AUTO_LINK_TLD_RE.test(tld));
+    if (!ok) { re.lastIndex = m.index + m[0].length; continue; }
+    if (m.index > last) out.push({ text: src.slice(last, m.index), href: null });
+    out.push({ text: token, href: linkHref(token) });
+    last = m.index + token.length;
+    re.lastIndex = last; // rewind past any punctuation we handed back
+  }
+  if (last < src.length) out.push({ text: src.slice(last), href: null });
+  return out;
+}
+const escHtml = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const escAttr = (s) => escHtml(s).replace(/"/g, '&quot;');
+// HTML string rather than React children — Ed writes this straight into a
+// contenteditable node, where React must not own the child DOM (see Ed).
+function linkHtml(text, strict = true) {
+  return splitLinks(text, strict).map(p => p.href
+    ? `<a href="${escAttr(p.href)}" target="_blank" rel="noopener noreferrer"`
+      + ` style="color:inherit;text-decoration:none">${escHtml(p.text)}</a>`
+    : escHtml(p.text)).join('');
+}
 
 const COLOR_SCHEMES = [
   { id: 'ink',    name: 'Navy ink',     ink: '#1a2a3a', side: '#f4efe6' },
@@ -1034,6 +1082,16 @@ const COLOR_SCHEMES = [
   { id: 'ocean',  name: 'Ocean',        ink: '#0e3a52', side: '#e6edf0' },
   { id: 'mono',   name: 'Monochrome',   ink: '#000000', side: '#faf9f4' },
 ];
+
+// Which named scheme a theme corresponds to, or null when the ink/side pair has
+// been hand-edited. Colours are compared loosely so a hand-typed "#FAF9F4 "
+// still reads as the scheme it matches.
+const normHex = (v) => String(v || '').trim().toLowerCase();
+function matchColorScheme(theme) {
+  const ink = normHex(theme && theme.ink);
+  const side = normHex(theme && theme.side);
+  return COLOR_SCHEMES.find(s => normHex(s.ink) === ink && normHex(s.side) === side) || null;
+}
 
 const APP_STATUSES = [
   { id: 'drafting',  label: 'Drafting',  color: '#9aa1a6' },
@@ -1646,17 +1704,33 @@ async function hydrateFromPayload(dirHandle, payload) {
 // ════════════════════════════════════════════════════════════════
 //  Editable primitives
 // ════════════════════════════════════════════════════════════════
-function Ed({ value, onChange, style = {}, tag: T = 'span', multiline = false, placeholder }) {
+// linkify renders URLs and email addresses inside the field as real anchors.
+// The data stays plain text: anchors are written imperatively and read back as
+// textContent on blur. React deliberately renders no children in that mode —
+// reconciling a virtual child list against a DOM the browser is also mutating
+// (contenteditable) is how you get "removeChild on a node that isn't a child".
+function Ed({ value, onChange, style = {}, tag: T = 'span', multiline = false, placeholder,
+              linkify = false, strictLinks = true }) {
   const ref = React.useRef(null);
   const lastExternal = React.useRef(value);
   const editable = !!window.__EDIT_ON;
 
   React.useEffect(() => {
-    if (ref.current && lastExternal.current !== value && document.activeElement !== ref.current) {
+    if (linkify || !ref.current) return;
+    if (lastExternal.current !== value && document.activeElement !== ref.current) {
       ref.current.textContent = value ?? '';
       lastExternal.current = value;
     }
-  }, [value]);
+  }, [value, linkify]);
+
+  // Runs on mount too — with linkify on, the element starts empty and this is
+  // what fills it. Skipped while focused so re-linking never eats the caret.
+  React.useEffect(() => {
+    if (!linkify || !ref.current) return;
+    if (document.activeElement === ref.current) return;
+    ref.current.innerHTML = linkHtml(value ?? '', strictLinks);
+    lastExternal.current = value;
+  }, [value, linkify, strictLinks]);
 
   return (
     <T
@@ -1664,8 +1738,12 @@ function Ed({ value, onChange, style = {}, tag: T = 'span', multiline = false, p
       contentEditable={editable}
       suppressContentEditableWarning
       onBlur={(e) => {
-        const next = multiline ? e.currentTarget.innerText : e.currentTarget.textContent;
+        const el = e.currentTarget;
+        const next = multiline ? el.innerText : el.textContent;
         lastExternal.current = next;
+        // Re-link here rather than leaning on the effect: an edit that ends up
+        // back at the old value wouldn't re-run it, leaving raw text behind.
+        if (linkify) el.innerHTML = linkHtml(next, strictLinks);
         onChange && onChange(next);
       }}
       onKeyDown={(e) => {
@@ -1684,7 +1762,7 @@ function Ed({ value, onChange, style = {}, tag: T = 'span', multiline = false, p
       data-placeholder={placeholder}
       style={{ outline: 'none', ...style }}
     >
-      {value}
+      {linkify ? null : value}
     </T>
   );
 }
@@ -2068,12 +2146,11 @@ function PageCredit({ left = 0, right = 0, text = CREDIT_TEXT_DEFAULT }) {
       letterSpacing: 0.2, lineHeight: 1.4, color: '#a9a49a',
       pointerEvents: 'none',
     }}>
-      {String(text).split(CREDIT_LINK_RE).map((part, i) => (
-        CREDIT_LINK_RE.test(part)
-          ? <a key={i} href={/^https?:\/\//i.test(part) ? part : `https://${part}`}
-              target="_blank" rel="noopener noreferrer"
-              style={{ color: 'inherit', textDecoration: 'none', pointerEvents: 'auto' }}>{part}</a>
-          : part
+      {splitLinks(text, false).map((p, i) => (
+        p.href
+          ? <a key={i} href={p.href} target="_blank" rel="noopener noreferrer"
+              style={{ color: 'inherit', textDecoration: 'none', pointerEvents: 'auto' }}>{p.text}</a>
+          : <React.Fragment key={i}>{p.text}</React.Fragment>
       ))}
     </div>
   );
@@ -2812,9 +2889,12 @@ function CoverLetterDocument({ cv, update }) {
                         style={{ ...lineCtrlBtn, color: '#c96442' }}>×</button>
                     </span>
                   )}
+                  {/* A sender line is deliberately a contact value, so any TLD
+                      links — no strict prose rules here. */}
                   <Ed tag="div"
                     value={l.value}
                     onChange={(v) => editLine(i, v)}
+                    linkify={l.id !== 'name'} strictLinks={false}
                     style={lineStyle(l.id)} />
                 </div>
               ))}
@@ -2872,7 +2952,7 @@ function CoverLetterDocument({ cv, update }) {
           <Ed tag="div"
             value={cl.body || ''}
             onChange={(v) => setCl('body', v)}
-            multiline
+            multiline linkify
             style={{
               marginTop: 14, fontSize: 11, lineHeight: 1.65,
               color: V1_INK_SOFT, letterSpacing: -0.01,
@@ -3629,6 +3709,7 @@ function TweaksPanel({ editOn, cv, update, headshotSrc,
   const totalSections = order.filter(s =>
     isMainSectionId(s.id) || sidebarMetaById[s.id]).length;
   const currentTemplate = resolveTemplateId(templateId);
+  const currentScheme = matchColorScheme(theme);
 
   return (
     <div className="tweaks-panel" ref={panelRef}
@@ -3663,10 +3744,11 @@ function TweaksPanel({ editOn, cv, update, headshotSrc,
       </InspectorGroup>
 
       <InspectorGroup id="colours" title="Colour scheme"
+        note={currentScheme ? currentScheme.name : 'Custom'}
         open={!!openGroups.colours} onToggle={toggleGroup}>
         <div className="swatches">
           {COLOR_SCHEMES.map(s => (
-            <div key={s.id} className={`swatch ${theme.ink === s.ink && theme.side === s.side ? 'active' : ''}`}
+            <div key={s.id} className={`swatch ${currentScheme && currentScheme.id === s.id ? 'active' : ''}`}
               title={s.name} onClick={() => update(['theme'], { ink: s.ink, side: s.side })}>
               <div className="ink" style={{ background: s.ink }} />
               <div className="side" style={{ background: s.side }} />
