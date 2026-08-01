@@ -986,6 +986,15 @@ const V1_RULE = '#d8d4cb';
 const V1_FONT = "'Inter Tight', 'Helvetica Neue', Helvetica, Arial, sans-serif";
 const V1_MONO = 'ui-monospace, "SF Mono", Menlo, monospace';
 
+// Optional footer credit line. Toggled by cv.showCredit (default on); the sentence
+// is overridable per application via cv.creditText. The host is fixed — it is the
+// project's identity, and a fork linking here is correct attribution.
+const CREDIT_TEXT_DEFAULT = 'Built and typeset in JobHunt Platform, a single-file CV editor';
+const CREDIT_HOST = 'github.com/bragisnaer/jobhunt-platform';
+const creditFor = (cv, left, right) => cv.showCredit === false
+  ? null
+  : { left, right, text: (cv.creditText || '').trim() || CREDIT_TEXT_DEFAULT };
+
 const COLOR_SCHEMES = [
   { id: 'ink',    name: 'Navy ink',     ink: '#1a2a3a', side: '#f4efe6' },
   { id: 'forest', name: 'Forest',       ink: '#1f3b2d', side: '#eef0e8' },
@@ -2097,7 +2106,7 @@ function HeadshotEditor({ src, transform, onTransformChange, onSrcChange, onClea
 // ════════════════════════════════════════════════════════════════
 //  Page shell
 // ════════════════════════════════════════════════════════════════
-function CVPage({ children, style = {} }) {
+function CVPage({ children, style = {}, credit = null }) {
   return (
     <div className="cv-page" style={{
       width: A4_W, height: A4_H, background: '#fff',
@@ -2106,6 +2115,22 @@ function CVPage({ children, style = {} }) {
       ...style,
     }}>
       {children}
+      {credit && <PageCredit {...credit} />}
+    </div>
+  );
+}
+// Absolutely positioned so it takes no part in the pagination measurements.
+// left/right inset keeps it inside the template's main column, clear of a sidebar band.
+function PageCredit({ left = 0, right = 0, text = CREDIT_TEXT_DEFAULT }) {
+  return (
+    <div style={{
+      position: 'absolute', left, right, bottom: 13,
+      textAlign: 'center', fontFamily: V1_MONO, fontSize: 6.8,
+      letterSpacing: 0.2, lineHeight: 1.4, color: '#a9a49a',
+      pointerEvents: 'none',
+    }}>
+      {text} · <a href={`https://${CREDIT_HOST}`} target="_blank" rel="noopener noreferrer"
+        style={{ color: 'inherit', textDecoration: 'none', pointerEvents: 'auto' }}>{CREDIT_HOST}</a>
     </div>
   );
 }
@@ -2993,6 +3018,8 @@ function EditorialTemplate({ cv, update, headshotSrc, onHeadshotSrc, onHeadshotT
   const flexDir = mirror ? 'row-reverse' : 'row';
   // CSS variables exposed so future template-specific CSS can use var(--cv-ink) etc.
   const pageStyle = { '--cv-ink': ink, '--cv-side': side };
+  // Inset past the 240px sidebar band so the credit sits under the main column.
+  const credit = mirror ? creditFor(cv, 0, 240) : creditFor(cv, 240, 0);
 
   return (
     <>
@@ -3002,7 +3029,7 @@ function EditorialTemplate({ cv, update, headshotSrc, onHeadshotSrc, onHeadshotT
           <V1MainP1 cv={cv} update={() => {}} ink={ink} ppmSplitIdx={ppm ? ppm.bullets.length : 0} omSplitIdx={om ? om.bullets.length : 0} />
         </div>
       </div>
-      <CVPage style={pageStyle}>
+      <CVPage style={pageStyle} credit={credit}>
         <div style={{ display: 'flex', flexDirection: flexDir, height: '100%' }}>
           <V1Sidebar cv={cv} update={update} page={1} splitIdx={splitIdx} ink={ink} side={side}
             headshotSrc={headshotSrc} onHeadshotSrc={onHeadshotSrc}
@@ -3011,7 +3038,7 @@ function EditorialTemplate({ cv, update, headshotSrc, onHeadshotSrc, onHeadshotT
         </div>
       </CVPage>
       <PageBreakMarker index={0} />
-      <CVPage style={pageStyle}>
+      <CVPage style={pageStyle} credit={credit}>
         <div style={{ display: 'flex', flexDirection: flexDir, height: '100%' }}>
           <V1Sidebar cv={cv} update={update} page={2} splitIdx={splitIdx} ink={ink} side={side} />
           <V1MainP2 cv={cv} update={update} ink={ink} ppmSplitIdx={ppmSplitIdx} omSplitIdx={omSplitIdx} />
@@ -3055,6 +3082,7 @@ function LinearTemplate({ cv, update, headshotSrc, onHeadshotSrc, onHeadshotTran
   const editable = !!window.__EDIT_ON;
   const visible = (cv.sidebar || []).filter(s => s.visible);
   const pageStyle = { '--cv-ink': ink, '--cv-side': side };
+  const credit = creditFor(cv, LINEAR_PADDING_X, LINEAR_PADDING_X);
 
   const addRole = (ci) => {
     const co = cv.experience[ci];
@@ -3346,7 +3374,7 @@ function LinearTemplate({ cv, update, headshotSrc, onHeadshotSrc, onHeadshotTran
         return (
           <React.Fragment key={pi}>
             {pi > 0 && <PageBreakMarker index={pi - 1} />}
-            <CVPage style={pageStyle}>
+            <CVPage style={pageStyle} credit={credit}>
               <div className="linear-body" style={{
                 padding: `${LINEAR_PADDING_TOP}px ${LINEAR_PADDING_X}px ${LINEAR_PADDING_BOTTOM}px`,
                 height: '100%', boxSizing: 'border-box',
@@ -3729,6 +3757,27 @@ function TweaksPanel({ editOn, cv, update, headshotSrc }) {
             </div>
           );
         })}
+      </div>
+
+      <div className="group">
+        <h4>Footer credit</h4>
+        <div className="row" title="A small grey line at the bottom of every CV page.">
+          <input type="checkbox" checked={cv.showCredit !== false}
+            onChange={(e) => update(['showCredit'], e.target.checked)} />
+          <span style={{ fontSize: 11, lineHeight: 1.45, opacity: 0.85 }}>Show footer credit</span>
+        </div>
+        {cv.showCredit !== false && (
+          <>
+            <div className="row">
+              <input type="text" value={cv.creditText || ''}
+                placeholder={CREDIT_TEXT_DEFAULT}
+                onChange={(e) => update(['creditText'], e.target.value)} />
+            </div>
+            <div style={{ fontSize: 10, lineHeight: 1.45, opacity: 0.6, paddingTop: 2 }}>
+              Leave blank for the default. The {CREDIT_HOST} link is always shown.
+            </div>
+          </>
+        )}
       </div>
 
       <div className="group">

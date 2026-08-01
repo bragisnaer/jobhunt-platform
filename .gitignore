@@ -4,6 +4,12 @@ uploads/
 extracted/
 *.zip
 
+# Real CV data — the app writes these. They contain personal details and must
+# never land in this public repo. Seed data belongs in SEED_CV, nowhere else.
+cv-data.json
+*_All-Applications_*.json
+images/
+
 # Secrets
 .env*
 !.env.example
@@ -26,3 +32,4 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.gstack/
