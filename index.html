@@ -3874,7 +3874,9 @@ function Toolbar({ editOn, setEditOn, onPrint, onExport, onImport,
 
   const syncPill = (() => {
     const cfg = {
-      unsupported: { label: 'Local only', title: 'Folder sync needs a Chromium browser (Chrome, Edge, Brave, Opera).', onClick: null, disabled: true },
+      // Brave is Chromium but ships the File System Access API switched off, so
+      // naming it as supported sent people hunting for a bug that was a flag.
+      unsupported: { label: 'Local only', title: 'Folder sync needs the File System Access API — Chrome or Edge on desktop. Firefox and Safari have never shipped it; Brave has it behind brave://flags/#file-system-access-api. Back up / Restore works everywhere.', onClick: null, disabled: true },
       idle:        { label: 'Not synced', title: 'Click to bind this app to a folder for cross-device sync.', onClick: onSetUpSync, disabled: false },
       connecting:  { label: 'Connecting…', title: 'Setting up folder sync…', onClick: null, disabled: true },
       bound:       { label: syncDirName ? `Synced · ${syncDirName}` : 'Synced', title: 'Click to stop syncing (data stays in browser).', onClick: onUnbindSync, disabled: false },

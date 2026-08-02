@@ -82,14 +82,22 @@ To run fully offline, download the three scripts, drop them next to `index.html`
 
 ## Browser support
 
-| Feature | Chrome / Edge | Firefox | Safari |
-|---|---|---|---|
-| Editing, templates, print to PDF | ✅ | ✅ | ✅ |
-| Headshot upload (IndexedDB) | ✅ | ✅ | ✅ |
-| JSON export / import | ✅ | ✅ | ✅ |
-| Folder sync (File System Access API) | ✅ | ❌ | ❌ |
+| Feature | Chrome / Edge | Brave | Firefox | Safari |
+|---|---|---|---|---|
+| Editing, templates, print to PDF | ✅ | ✅ | ✅ | ✅ |
+| Headshot upload (IndexedDB) | ✅ | ✅ | ✅ | ✅ |
+| JSON export / import | ✅ | ✅ | ✅ | ✅ |
+| Folder sync (File System Access API) | ✅ | behind a flag | ❌ | ❌ |
 
-On Firefox and Safari the sync UI is hidden and JSON export/import is the way to move data.
+Folder sync needs the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API),
+which only Chromium desktop browsers implement. Where it is missing, the toolbar pill reads **Local only**
+and Back up / Restore is the way to move data.
+
+**Brave** is Chromium but ships the API switched off, so sync looks broken there for no visible reason.
+Enable `brave://flags/#file-system-access-api` and relaunch, and the pill becomes clickable.
+
+There is no equivalent API in Firefox or Safari — no web page in those browsers can hold a writable handle
+to a folder on your disk between visits. That is a browser limitation, not something this app can work around.
 
 ## Getting started
 
