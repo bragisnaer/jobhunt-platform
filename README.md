@@ -82,22 +82,32 @@ To run fully offline, download the three scripts, drop them next to `index.html`
 
 ## Browser support
 
-| Feature | Chrome / Edge | Brave | Firefox | Safari |
-|---|---|---|---|---|
-| Editing, templates, print to PDF | ✅ | ✅ | ✅ | ✅ |
-| Headshot upload (IndexedDB) | ✅ | ✅ | ✅ | ✅ |
-| JSON export / import | ✅ | ✅ | ✅ | ✅ |
-| Folder sync (File System Access API) | ✅ | behind a flag | ❌ | ❌ |
+**Editing, templates, print to PDF, headshot upload, and JSON Back up / Restore work in every browser
+listed below.** Only folder sync is conditional, because it needs the
+[File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API) — a Chromium
+desktop feature that no other engine implements. Where it is missing, the toolbar pill reads **Local only**.
 
-Folder sync needs the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API),
-which only Chromium desktop browsers implement. Where it is missing, the toolbar pill reads **Local only**
-and Back up / Restore is the way to move data.
+| Browser | Folder sync | What you need to do |
+|---|---|---|
+| Chrome, desktop 105+ | ✅ | Nothing |
+| Edge, desktop 105+ | ✅ | Nothing |
+| Opera, desktop 91+ | ✅ | Nothing |
+| Brave, desktop | ⚙️ off by default | `brave://flags` → search "File System Access API" → **Enabled** → relaunch |
+| Vivaldi, desktop | ✅ expected¹ | Nothing known |
+| Firefox, any platform | ❌ | Nothing to tweak. Mozilla's standards position on the API is *harmful*, so there is no flag and no plan |
+| Safari, macOS and iOS | ❌ | Nothing to tweak. Safari implements only the origin-private file system, which lives inside the browser profile where Dropbox and Finder cannot see it |
+| Samsung Internet, and every other mobile browser | ❌ | Nothing to tweak. No mobile browser implements it, Chrome for Android included |
 
-**Brave** is Chromium but ships the API switched off, so sync looks broken there for no visible reason.
-Enable `brave://flags/#file-system-access-api` and relaunch, and the pill becomes clickable.
+¹ Vivaldi is Chromium and ships no known restriction on the API, but this has not been tested. If you use
+Vivaldi, the toolbar pill tells you in one glance: **Not synced** means it works, **Local only** means it does not.
 
-There is no equivalent API in Firefox or Safari — no web page in those browsers can hold a writable handle
-to a folder on your disk between visits. That is a browser limitation, not something this app can work around.
+Brave is the confusing one. It is Chromium, so everything else about it behaves like Chrome, but it disables
+the File System Access API by default as a fingerprinting defence — leaving folder sync looking broken with no
+explanation. The flag above turns it on.
+
+If your browser is in the ❌ rows, nothing is wrong and there is nothing to wait for: no web page in those
+browsers can hold a writable handle to a folder on your disk between visits. Use Back up / Restore, which is
+a plain JSON file and works everywhere.
 
 ## Getting started
 
