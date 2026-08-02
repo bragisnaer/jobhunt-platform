@@ -45,15 +45,19 @@ one into the app is the slow part. A job pack skips it.
 
 1. **Applications → Job pack template** downloads a JSON file. It is pre-filled with your base CV's real
    summary and experience, and annotated throughout with instructions for whoever fills it in.
-2. Fill in one entry per job. If you are handing this to an AI, the file already tells it what each field
-   is for, that it must not invent employers or achievements, and how the cover letter should be written.
-3. **Applications → Import pack** adds them. You get a preview of exactly what will be created before
-   anything is written.
+2. Fill in one entry per job — **as many as you like in a single file**. If you are handing this to an AI,
+   the file already tells it what each field is for, that it must not invent employers or achievements, and
+   how the cover letter should be written.
+3. **Applications → Import pack** adds them all at once. You get a numbered preview of exactly what will be
+   created before anything is written.
+
+Every imported application gets its **own CV and its own cover letter**, independent of each other and of
+your base. Editing one never affects another, exactly as if you had forked them by hand.
 
 The format carries **only what changes**. Each entry forks your base CV and merges its fields over the
 top, so a pack that rewrites the profile paragraph and the cover letter leaves your experience, education,
 skills, theme, and template exactly as you set them. Fields you omit are inherited, which also means a
-sparse pack cannot damage anything.
+sparse pack cannot damage anything — the second entry below is as valid as the first.
 
 ```json
 {
@@ -71,6 +75,10 @@ sparse pack cannot damage anything.
         "subject": "Application for Head of Operations",
         "body": "First paragraph.\n\nSecond paragraph."
       }
+    },
+    {
+      "company": "Acme Retail",
+      "position": "Regional Manager"
     }
   ]
 }
