@@ -839,6 +839,27 @@
     flex-shrink: 0;
   }
 
+  /* Sent copies, on the application card */
+  .app-card-summary .meta .snap-count { display: block; margin-top: 2px; color: #1a2a3a; opacity: 0.85; }
+  .app-snapshots { padding: 0 16px 4px; }
+  .app-snapshots .snap-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; color: #8a857a; }
+  .app-snapshots .snap-head button { margin-left: auto; font: inherit; font-size: 11px;
+    text-transform: none; letter-spacing: 0; padding: 4px 10px; border-radius: 4px;
+    border: 1px solid #d8d4cb; background: #fff; color: #1a1a1a; cursor: pointer; }
+  .app-snapshots .snap-head button:hover { background: #f5f3ee; }
+  .app-snapshots .snap-empty { font-size: 12px; color: #6b6b66; padding-bottom: 8px; line-height: 1.5; }
+  .app-snapshots ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .app-snapshots li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 6px 10px; border: 1px solid #ece7da; border-radius: 6px; background: #faf8f3; font-size: 12px; }
+  .app-snapshots li .when { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: #2a2a26; }
+  .app-snapshots li .what { color: #6b6b66; flex: 1; min-width: 0; }
+  .app-snapshots li button { font: inherit; font-size: 11px; padding: 4px 9px; border-radius: 4px;
+    border: 1px solid #d8d4cb; background: #fff; color: #1a1a1a; cursor: pointer; }
+  .app-snapshots li button:hover { background: #f5f3ee; }
+  .app-snapshots li button.danger { color: #c96442; border-color: #e8c7bc; }
+  .app-snapshots li button.danger:hover { background: #ffefe9; }
+
   /* Snapshot banner */
   .snapshot-banner { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 999; background: #1a2a3a; color: #fff; padding: 8px 14px; border-radius: 8px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 12px; }
   .snapshot-banner button { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; padding: 4px 10px; font: inherit; font-size: 11px; cursor: pointer; }
@@ -1439,6 +1460,25 @@ async function idbDel(key) {
       r.onerror = () => rej(r.error);
     });
   } catch (e) { console.warn(`idbDel(${key}) failed`, e); }
+}
+// Every key in the store, so a sweep can find data nothing points at any more.
+// Without this there is no way to notice a leak: localStorage can be enumerated
+// but IndexedDB only answers questions about keys you already know.
+//
+// Returns null — not [] — when it cannot read the store. A failure that looks
+// like "the database is empty" would tell a sweep that every record it knows
+// about has already vanished, which is the one conclusion that must never be
+// reached by accident.
+async function idbKeys() {
+  try {
+    const db = await idbOpen();
+    return await new Promise((res, rej) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const r = tx.objectStore(IDB_STORE).getAllKeys();
+      r.onsuccess = () => res(r.result || []);
+      r.onerror = () => rej(r.error);
+    });
+  } catch (e) { console.warn('idbKeys failed', e); return null; }
 }
 
 // ── v1 storage keys ─────────────────────────────────────────────
@@ -2163,6 +2203,190 @@ async function hydrateFromPayload(dirHandle, payload) {
   saveAppsMeta(newMeta);
   const activeId = (newMeta.find(m => m.isBase) || newMeta[0])?.id || null;
   if (activeId) persistActiveAppId(activeId);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Sent copies — the CV frozen at the moment an application went out
+// ════════════════════════════════════════════════════════════════
+// Three months after you applied, the employer calls. The application's CV has
+// been edited eleven times since, so the live document no longer tells you what
+// they are holding. A sent copy is the answer: the whole CV blob — which
+// carries the cover letter, the theme and the template with it — frozen at the
+// moment the application stopped being a draft, and read back later through the
+// snapshot viewer in App.
+//
+// Where the bytes live is not a free choice. localStorage is ~5MB for the whole
+// origin and already holds every application's live CV; fifty frozen copies
+// beside them is how you get a QuotaExceededError in the middle of an ordinary
+// keystroke. So only the index — a couple of hundred bytes per copy — stays in
+// localStorage and every payload goes to IndexedDB, which is exactly why
+// headshots went there in the first place.
+//
+// The payloads share the existing `images` object store instead of getting one
+// of their own. A new store means opening the database at a higher version, and
+// an upgrade is blocked for as long as another tab holds the old one open —
+// which would hang idbOpen and take headshots down with it. A key prefix costs
+// nothing and cannot deadlock.
+//
+// The index is deliberately its own localStorage key rather than a field on
+// AppMeta. AppMeta is rewritten on every keystroke and is what the folder-sync
+// mirror serialises on a 600ms debounce; hanging frozen documents off it would
+// drag all of them through every one of those writes. That also settles what
+// folder sync does with sent copies: nothing, they are device-local. Back up /
+// Restore does carry them, because a backup is written once, deliberately, and
+// a record of what you sent that cannot survive moving to a new laptop is not
+// a record of anything.
+const SNAPSHOTS_KEY = 'cv-snapshots';
+const snapshotCvKey = (snapId) => `snapcv:${snapId}`;
+const snapshotImageKey = (hash) => `snapimg:${hash}`;
+const SNAPSHOT_KEY_PREFIXES = ['snapcv:', 'snapimg:'];
+// Ten per application. Something has to bound a store that never expires, and
+// the cap is per application rather than global so one busy application cannot
+// evict another's only copy. Ten is generous in practice: the automatic capture
+// fires once per send, so reaching it takes nine deliberate re-captures.
+const MAX_SNAPSHOTS_PER_APP = 10;
+
+// FNV-1a, paired with the input's length. Not a security hash — it only has to
+// tell two headshots apart well enough that copies frozen from the same photo
+// share one stored copy of it, and to spot a re-capture of a CV nobody edited.
+// Carrying the length means a 32-bit collision is harmless unless the two
+// inputs happen to be the same size as well.
+function contentHash(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${h.toString(36)}-${str.length.toString(36)}`;
+}
+
+// Returns null — not [] — when the stored index is unreadable, and every caller
+// treats null as "touch nothing". The two cases have to stay distinguishable:
+// an absent index means there are no sent copies and any payload still in
+// IndexedDB is garbage, while a corrupt one means the payloads are probably
+// intact and sweeping them would destroy the only surviving record of what the
+// user actually sent.
+function loadSnapshotIndex() {
+  let raw = null;
+  try { raw = localStorage.getItem(SNAPSHOTS_KEY); } catch { return null; }
+  if (raw == null) return [];
+  try {
+    const v = JSON.parse(raw);
+    if (!Array.isArray(v)) return null;
+    return v.filter(s => s && s.id && s.appId);
+  } catch (e) {
+    console.warn('Snapshot index is unreadable; leaving frozen copies alone', e);
+    return null;
+  }
+}
+const saveSnapshotIndex = (list) => saveJson(SNAPSHOTS_KEY, list);
+
+const snapshotsForApp = (index, appId) => (index || [])
+  .filter(s => s.appId === appId)
+  .sort((a, b) => (b.takenAt || '').localeCompare(a.takenAt || ''));
+
+// Pure. Returns the next index plus the entries the cap pushed off the end, so
+// the caller can delete their payloads in the same breath — dropping an entry
+// from the index without deleting its blob is precisely the leak this module is
+// supposed not to have.
+function withSnapshotAdded(index, entry, limit = MAX_SNAPSHOTS_PER_APP) {
+  const others = (index || []).filter(s => s.appId !== entry.appId);
+  const mine = [entry, ...(index || []).filter(s => s.appId === entry.appId)]
+    .sort((a, b) => (b.takenAt || '').localeCompare(a.takenAt || ''));
+  return { index: [...others, ...mine.slice(0, limit)], dropped: mine.slice(limit) };
+}
+
+// Pure. Splits the index by whether the application it belongs to still exists.
+function pruneSnapshotIndex(index, appIds) {
+  const live = new Set(appIds || []);
+  const kept = [], dropped = [];
+  for (const s of (index || [])) (live.has(s.appId) ? kept : dropped).push(s);
+  return { kept, dropped };
+}
+
+// Every IndexedDB key the index still reaches. Image keys are shared — two
+// copies frozen from the same photo name the same snapimg: key — so a key is
+// only garbage once no surviving entry names it. Deleting by entry without this
+// check would blank the photo on a copy that had nothing to do with the delete.
+function liveSnapshotKeys(index) {
+  const live = new Set();
+  for (const s of (index || [])) {
+    live.add(snapshotCvKey(s.id));
+    if (s.imgKey) live.add(s.imgKey);
+  }
+  return live;
+}
+
+function isSnapshotStorageKey(key) {
+  return typeof key === 'string' && SNAPSHOT_KEY_PREFIXES.some(p => key.startsWith(p));
+}
+
+// Freeze one application's CV. The headshot is stored under a key derived from
+// its own bytes rather than a pointer to headshot:<appId>: that live key is
+// overwritten the day the user uploads a new photo, and every frozen copy would
+// silently start showing a picture that was never sent. Content addressing also
+// means the usual case — several copies of one application, same photo — costs
+// one copy of the image, not one per snapshot.
+async function captureSnapshot({ appId, cv, label, status, statusLabel, auto }) {
+  const id = genId();
+  const json = JSON.stringify(cv);
+  let imgKey = null;
+  try {
+    const bytes = await idbGet(appHeadshotKeyV2(appId));
+    if (bytes) {
+      imgKey = snapshotImageKey(contentHash(bytes));
+      if (!(await idbGet(imgKey))) await idbPut(imgKey, bytes);
+    }
+  } catch (e) { console.warn('Freezing the headshot failed; copy will have no photo', e); }
+  // Re-parsed rather than handed the live object: the CV in React state keeps
+  // being edited, and the copy has to be detached from it for good.
+  await idbPut(snapshotCvKey(id), JSON.parse(json));
+  return {
+    id, appId,
+    takenAt: new Date().toISOString(),
+    status, statusLabel, label, imgKey,
+    cvHash: contentHash(json),
+    auto: !!auto,
+  };
+}
+
+// Delete payloads for entries that have already left the index. `remaining` is
+// what survived, and is what decides whether a shared image key is now unused.
+async function deleteSnapshotBlobs(entries, remaining) {
+  const stillLive = liveSnapshotKeys(remaining);
+  for (const s of (entries || [])) {
+    const cvKey = snapshotCvKey(s.id);
+    if (!stillLive.has(cvKey)) await idbDel(cvKey);
+    if (s.imgKey && !stillLive.has(s.imgKey)) await idbDel(s.imgKey);
+  }
+}
+
+// Garbage collection, run once at startup. A frozen copy holds a full CV, so
+// data that nothing can reach any more must not sit in IndexedDB forever — and
+// there are more ways to strand it than a delete hook could cover: deleting an
+// application, restoring a backup over the top, hydrating from a synced folder
+// (which replaces every application with the file's, ids and all), or a tab
+// that died between writing a payload and writing the index. Sweeping by
+// reachability catches all of them, including the ones nobody has thought of.
+// Returns the pruned index, or null when it declined to touch anything.
+async function sweepSnapshotStorage(appIds) {
+  const index = loadSnapshotIndex();
+  if (index == null) return null;
+  const keys = await idbKeys();
+  if (keys == null) return null;
+  const present = new Set(keys.filter(isSnapshotStorageKey));
+  const byApp = pruneSnapshotIndex(index, appIds);
+  // The mirror image of an orphaned payload: an entry whose payload is gone is
+  // unopenable, and listing it promises the reader a copy that is not there.
+  // That is the far side of the window in which a delete rewrites the index and
+  // the tab dies before the blob delete lands.
+  const kept = byApp.kept.filter(s => present.has(snapshotCvKey(s.id)));
+  if (kept.length !== index.length) saveSnapshotIndex(kept);
+  const live = liveSnapshotKeys(kept);
+  for (const k of present) {
+    if (!live.has(k)) await idbDel(k);
+  }
+  return kept;
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -4764,11 +4988,17 @@ function ColorSwatchPicker({ value, onChange }) {
 }
 
 function ApplicationCard({ app, isActive, expanded, onToggle, onPatch, onDelete, onView,
-                           onPromote, onDemote, onDuplicate, canDemote = true, canDelete = true }) {
+                           onPromote, onDemote, onDuplicate, canDemote = true, canDelete = true,
+                           snapshots = [], onCaptureSnapshot, onOpenSnapshot, onDeleteSnapshot }) {
   const patch = (k, v) => onPatch({ ...app, [k]: v });
   const fmtDate = (iso) => {
     if (!iso) return '—';
     try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
+  };
+  const fmtStamp = (iso) => {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }); }
+    catch { return iso; }
   };
   return (
     <div className={`app-card ${expanded ? 'expanded' : ''} ${app.isBase ? 'base-app' : ''} ${isActive ? 'active' : ''}`}>
@@ -4789,6 +5019,13 @@ function ApplicationCard({ app, isActive, expanded, onToggle, onPatch, onDelete,
             <span>{app.appliedDate ? `Applied ${fmtDate(app.appliedDate)}` : 'Not yet applied'}</span>
           )}
           <span className="updated">Updated {fmtDate(app.updatedAt)}</span>
+          {/* Visible while the card is collapsed, because a copy taken silently
+              that you cannot see was taken is indistinguishable from no copy. */}
+          {snapshots.length > 0 && (
+            <span className="snap-count" title="A copy of the CV and cover letter was frozen when this application went out">
+              {snapshots.length === 1 ? '1 sent copy' : `${snapshots.length} sent copies`}
+            </span>
+          )}
         </div>
       </div>
       {expanded && <>
@@ -4833,6 +5070,45 @@ function ApplicationCard({ app, isActive, expanded, onToggle, onPatch, onDelete,
             <textarea value={app.notes} onChange={(e) => patch('notes', e.target.value)} placeholder={app.isBase ? "Notes about this base — when to use it, what role family it targets…" : "Recruiter contact, follow-up reminders, interview prep…"} />
           </div>
         </div>
+        {/* A Base is a starting point, never something you send, so it has no
+            status to leave and nothing to freeze. */}
+        {!app.isBase && (
+          <div className="app-snapshots">
+            <div className="snap-head">
+              <span>Sent copies</span>
+              <button type="button" onClick={() => onCaptureSnapshot(app)}
+                title="Freeze the CV and cover letter exactly as they are right now">
+                Freeze a copy now
+              </button>
+            </div>
+            {snapshots.length === 0 ? (
+              <div className="snap-empty">
+                Nothing frozen yet. A copy is taken automatically the first time this application
+                leaves Drafting, so months later you can still read exactly what you sent.
+              </div>
+            ) : (
+              <ul>
+                {snapshots.map(s => (
+                  <li key={s.id}>
+                    <span className="when">{fmtStamp(s.takenAt)}</span>
+                    {/* The status name is the one recorded at capture, not a
+                        lookup: a custom status can be deleted later, and the
+                        copy should still say what it went out as. */}
+                    <span className="what">
+                      {s.statusLabel || s.status || 'Sent'}{s.auto ? '' : ' · frozen by hand'}
+                    </span>
+                    <button type="button" onClick={() => onOpenSnapshot(s.id, 'cv')}
+                      title="Read the CV as it was at that moment">View CV</button>
+                    <button type="button" onClick={() => onOpenSnapshot(s.id, 'letter')}
+                      title="Read the cover letter as it was at that moment">View letter</button>
+                    <button type="button" className="danger" onClick={() => onDeleteSnapshot(s.id)}
+                      title="Delete this frozen copy — the application keeps its current CV">Delete</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         <div className="app-card-actions">
           <button onClick={() => onView('cv')} title="Open and edit the CV for this application">Edit CV</button>
           <button onClick={() => onView('letter')} title="Open and edit the cover letter for this application">Edit cover letter</button>
@@ -5006,6 +5282,7 @@ function ApplicationsDocument({ apps, activeAppId, onView, onCreate,
                                 onPatch, onPromote, onDemote, onDuplicate, onDelete,
                                 onDownloadTemplate, onImportPack,
                                 undoLog, onUndo, onClearUndo,
+                                snapshots, onCaptureSnapshot, onOpenSnapshot, onDeleteSnapshot,
                                 customStatuses, setCustomStatuses, setStatusOrder, onStatusDeleted }) {
   const packInputRef = React.useRef(null);
   const { statuses: allStatuses, byId: allStatusesById } = React.useContext(StatusesContext);
@@ -5156,6 +5433,10 @@ function ApplicationsDocument({ apps, activeAppId, onView, onCreate,
             onDelete={() => onDelete(app.id)}
             canDemote={!(app.isBase && baseCount <= 1)}
             canDelete={!(app.isBase && baseCount <= 1)}
+            snapshots={snapshotsForApp(snapshots, app.id)}
+            onCaptureSnapshot={onCaptureSnapshot}
+            onOpenSnapshot={onOpenSnapshot}
+            onDeleteSnapshot={onDeleteSnapshot}
           />
         ))}
         {filtersActive && displayed.length === 0 && (
@@ -5322,6 +5603,18 @@ function App() {
   }, [zoom, doc]);
 
   const [viewingSnapshot, setViewingSnapshot] = React.useState(null);
+  // The index of frozen copies. Capture waits on IndexedDB before it has an
+  // entry to add, so the list it must add to is whatever is current when it
+  // finishes rather than what was on screen when it started — hence the ref.
+  // State exists only so the cards re-render; the ref is the truth, and every
+  // write goes through setSnapshots so the two and localStorage cannot drift.
+  const [snapshots, setSnapshotsState] = React.useState(() => loadSnapshotIndex() || []);
+  const snapshotsRef = React.useRef(snapshots);
+  const setSnapshots = (list) => {
+    snapshotsRef.current = list;
+    setSnapshotsState(list);
+    saveSnapshotIndex(list);
+  };
   const editPriorRef = React.useRef(null);
   React.useEffect(() => {
     if (viewingSnapshot) {
@@ -5599,6 +5892,27 @@ function App() {
       try { headshot = await idbGet(appHeadshotKeyV2(meta.id)); } catch {}
       payload.apps.push({ meta, cv: cvBlob, headshot });
     }
+    // Frozen copies ride along. They are the record of what you actually sent,
+    // and a record that dies with the laptop is not one — this file is the only
+    // way they reach a new machine, since the folder mirror deliberately leaves
+    // them behind. Both fields are additions to a v2 payload: schemaVersion
+    // stays 2, so an older build restores this file through the same branch it
+    // always did and simply ignores what it does not know about.
+    //
+    // The images sit in a shared map rather than inline on each copy because
+    // several copies of one application usually froze the same photo, and this
+    // file is already heavy with headshots.
+    payload.snapshots = [];
+    payload.snapshotImages = {};
+    for (const s of snapshots) {
+      const blob = await idbGet(snapshotCvKey(s.id));
+      if (!blob) continue; // index entry with no payload; the sweep will tidy it
+      if (s.imgKey && !payload.snapshotImages[s.imgKey]) {
+        const bytes = await idbGet(s.imgKey);
+        if (bytes) payload.snapshotImages[s.imgKey] = bytes;
+      }
+      payload.snapshots.push({ ...s, cv: blob });
+    }
     const namePart = slug(cv.name) || 'CV';
     downloadJson(`${namePart}_All-Applications_${new Date().toISOString().slice(0, 10)}.json`, payload);
   };
@@ -5679,12 +5993,23 @@ function App() {
       //   New (v2): { schemaVersion: 2, apps: [{meta, cv, headshot}, ...] }
       //   Legacy: { cv: {...}, headshot: ..., applications: [...] } — single-profile dump
       if (parsed && parsed.schemaVersion === SCHEMA_VERSION && Array.isArray(parsed.apps)) {
-        if (!confirm(`Restore ${parsed.apps.length} application(s)? Existing data will be replaced.`)) return;
+        const incomingSnaps = Array.isArray(parsed.snapshots) ? parsed.snapshots : [];
+        const heldSnaps = snapshotsRef.current;
+        const snapNote = heldSnaps.length
+          ? ` The ${heldSnaps.length === 1 ? 'frozen copy' : `${heldSnaps.length} frozen copies`} on this machine will go too.`
+          : '';
+        if (!confirm(`Restore ${parsed.apps.length} application(s)? Existing data will be replaced.${snapNote}`)) return;
         // Wipe current state
         for (const a of apps) {
           deleteAppCv(a.id);
           try { await idbDel(appHeadshotKeyV2(a.id)); } catch {}
         }
+        // Frozen copies belong to applications that are about to stop existing,
+        // so they go too. Emptying the index first means that even if this dies
+        // half way, nothing claims a payload it no longer has, and the startup
+        // sweep collects whatever is left behind.
+        setSnapshots([]);
+        await deleteSnapshotBlobs(heldSnaps, []);
         // Apply new
         const newMetas = [];
         for (const entry of parsed.apps) {
@@ -5698,6 +6023,23 @@ function App() {
         }
         // Min-1-Base safety
         if (!newMetas.some(m => m.isBase) && newMetas.length) newMetas[0].isBase = true;
+        // Restore the frozen copies whose application actually came back. An
+        // entry pointing at an application this file does not contain would be
+        // invisible for good — no card would ever list it — while still holding
+        // a complete CV in IndexedDB.
+        const restoredIds = new Set(newMetas.map(m => m.id));
+        const restoredSnaps = [];
+        for (const s of incomingSnaps) {
+          if (!s || !s.id || !s.cv || !restoredIds.has(s.appId)) continue;
+          const { cv: snapCv, ...entry } = s;
+          try {
+            await idbPut(snapshotCvKey(entry.id), snapCv);
+            const bytes = entry.imgKey && parsed.snapshotImages ? parsed.snapshotImages[entry.imgKey] : null;
+            if (bytes) await idbPut(entry.imgKey, bytes);
+            restoredSnaps.push(entry);
+          } catch (e) { console.warn('Restoring a frozen copy failed', e); }
+        }
+        setSnapshots(restoredSnaps);
         setApps(newMetas);
         const nextActive = (newMetas.find(m => m.isBase) || newMetas[0])?.id || null;
         if (nextActive) {
@@ -5749,9 +6091,124 @@ function App() {
     setDoc(docKind === 'letter' ? 'letter' : 'cv');
   };
 
-  const onPatchApp = (patched) => {
-    setApps(prev => prev.map(a => a.id === patched.id ? { ...patched, updatedAt: new Date().toISOString() } : a));
+  // Freeze one application's CV, cover letter, theme, template and headshot as
+  // they stand. Reads the CV out of React state when this is the open
+  // application: the persist to localStorage is debounced by 250ms, so the
+  // stored blob can be a keystroke behind at the instant the status changes,
+  // and a copy that is nearly what you sent is worse than useless.
+  const captureAppSnapshot = async (app, { auto = false } = {}) => {
+    if (!app || !app.id) return null;
+    const blob = app.id === activeAppId ? cv : loadAppCv(app.id);
+    if (!blob) return null;
+    const hash = contentHash(JSON.stringify(blob));
+    const newest = snapshotsForApp(snapshotsRef.current, app.id)[0];
+    if (newest && newest.cvHash === hash) {
+      // Flipping a status back to Drafting and out again is not a second send,
+      // and a copy byte-identical to the one already frozen is only a second
+      // pile of the same personal data. The automatic path declines quietly;
+      // a hand-pressed button gets told why nothing happened.
+      if (!auto) alert('This is identical to the copy already frozen for this application, so nothing was added.');
+      return null;
+    }
+    const statusMeta = allStatuses.find(s => s.id === app.status);
+    try {
+      const entry = await captureSnapshot({
+        appId: app.id, cv: blob,
+        label: appDisplayLabel(app),
+        status: app.status,
+        statusLabel: (statusMeta && statusMeta.label) || app.status,
+        auto,
+      });
+      const { index, dropped } = withSnapshotAdded(snapshotsRef.current, entry);
+      setSnapshots(index);
+      // Index first, blobs second. The other order can leave the index naming a
+      // payload that is already gone; this order can at worst leave a payload
+      // nothing names, which the startup sweep collects.
+      if (dropped.length) await deleteSnapshotBlobs(dropped, index);
+      return entry;
+    } catch (e) {
+      console.error('Freezing a copy failed', e);
+      if (!auto) alert('Could not freeze a copy: ' + (e && e.message || String(e)));
+      return null;
+    }
   };
+
+  // Every status other than 'drafting' describes an application that has
+  // already left your hands, so drafting → anything is the moment worth
+  // freezing. That rule survives custom statuses, whose meaning we cannot know
+  // but which are certainly not "still a draft". Withdrawn is included on
+  // purpose: a withdrawn draft that was never sent costs one copy the user can
+  // delete in two clicks, while a missed capture costs the only record of a CV
+  // that is already three edits gone.
+  //
+  // The capture is automatic and silent. A prompt on every status change is a
+  // prompt you learn to dismiss, and the one you dismiss is the one you needed
+  // three months later. What keeps it from being invisible magic is that the
+  // result shows up immediately and can be undone: the card grows a "sent copy"
+  // line, collapsed or expanded, and every copy has a Delete button. Anything
+  // outside this one transition — a re-send, a document you fixed and sent
+  // again — is a deliberate press of "Freeze a copy now".
+  const onPatchApp = (patched) => {
+    const before = apps.find(a => a.id === patched.id);
+    setApps(prev => prev.map(a => a.id === patched.id ? { ...patched, updatedAt: new Date().toISOString() } : a));
+    if (before && !patched.isBase && before.status === 'drafting' && patched.status !== 'drafting') {
+      captureAppSnapshot(patched, { auto: true });
+    }
+  };
+
+  // Hands the existing snapshot viewer exactly the shape it already reads:
+  // { cv, doc, appLabel, headshotSrc }. The label is the one recorded at
+  // capture, so a copy sent to "Acme — Designer" still says so after the
+  // application was renamed. snapId rides along only so a delete can close the
+  // view it is deleting.
+  const onOpenSnapshot = async (snapId, docKind) => {
+    const entry = snapshotsRef.current.find(s => s.id === snapId);
+    if (!entry) return;
+    const blob = await idbGet(snapshotCvKey(entry.id));
+    if (!blob) {
+      alert('The frozen document behind that entry is no longer in this browser\'s storage, so there is nothing to show. Delete the entry to tidy it away.');
+      return;
+    }
+    const headshotSrc = entry.imgKey ? await idbGet(entry.imgKey) : null;
+    setViewingSnapshot({
+      // Merged over the seed for the same reason every other load is: a copy
+      // frozen months ago predates whatever fields the renderer has grown since.
+      cv: deepMerge(SEED_CV, blob),
+      doc: docKind === 'letter' ? 'letter' : 'cv',
+      appLabel: entry.label || 'Application',
+      headshotSrc: headshotSrc || null,
+      snapId: entry.id,
+    });
+  };
+
+  const onDeleteSnapshot = async (snapId) => {
+    const entry = snapshotsRef.current.find(s => s.id === snapId);
+    if (!entry) return;
+    let when = entry.takenAt;
+    try { when = new Date(entry.takenAt).toLocaleString(); } catch {}
+    if (!confirm(`Delete the copy frozen on ${when}?\n\nThe application keeps its current CV and cover letter. Only this frozen record of what you sent goes, and it cannot be recovered.`)) return;
+    const next = snapshotsRef.current.filter(s => s.id !== snapId);
+    setSnapshots(next);
+    if (viewingSnapshot && viewingSnapshot.snapId === snapId) setViewingSnapshot(null);
+    await deleteSnapshotBlobs([entry], next);
+  };
+
+  // One sweep at startup, once the application list is known. Deleting an
+  // application, restoring a backup and hydrating from a synced folder all
+  // strand frozen copies, and none of them can be relied on to clean up after
+  // itself — a copy holds a whole CV, so leaving that behind is a privacy leak,
+  // not a wasted kilobyte.
+  React.useEffect(() => {
+    const before = snapshotsRef.current;
+    sweepSnapshotStorage(loadAppsMeta().map(a => a.id))
+      // A copy frozen while the sweep was still reading knows more than the
+      // sweep does. Identity comparison catches that, because every write
+      // replaces the array — without it a fast click after load would have its
+      // brand new entry overwritten by a list assembled before it existed.
+      .then(kept => { if (kept && snapshotsRef.current === before) setSnapshots(kept); })
+      .catch(e => console.warn('Snapshot sweep failed', e));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onPromoteToBase = (id) => {
     setApps(prev => prev.map(a => a.id === id ? { ...a, isBase: true, updatedAt: new Date().toISOString() } : a));
@@ -5956,6 +6413,10 @@ function App() {
         onCreate={onCreateApplication}
         onDownloadTemplate={onDownloadJobPackTemplate}
         onImportPack={onImportJobPack}
+        snapshots={snapshots}
+        onCaptureSnapshot={captureAppSnapshot}
+        onOpenSnapshot={onOpenSnapshot}
+        onDeleteSnapshot={onDeleteSnapshot}
         onPatch={onPatchApp}
         onPromote={onPromoteToBase}
         onDemote={onDemoteFromBase}
@@ -5988,9 +6449,13 @@ function App() {
   return (
     <StatusesContext.Provider value={statusesContextValue}>
     <HeadshotPanelContext.Provider value={hsPanelCtx}>
+      {/* Asking the toolbar for a different document is a way out of a frozen
+          copy too. Without clearing it here those buttons look dead: they do
+          change `doc`, but the snapshot holds the stage until its banner is
+          closed, so nothing on screen moves. */}
       <Toolbar editOn={editOn} setEditOn={setEditOn}
         onPrint={onPrint} onExport={onExport} onImport={onImport}
-        doc={doc} setDoc={setDoc}
+        doc={doc} setDoc={(v) => { setViewingSnapshot(null); setDoc(v); }}
         zoom={zoom} setZoom={(v) => setZoom(clampZoom(v))}
         syncState={syncState} syncDirName={syncDirName}
         onSetUpSync={onSetUpSync} onReconnectSync={onReconnectSync} onUnbindSync={onUnbindSync} />
@@ -6009,10 +6474,15 @@ function App() {
         </div>
       )}
       {viewingSnapshot && <SnapshotBanner snap={viewingSnapshot} onClose={() => setViewingSnapshot(null)} />}
+      {/* A frozen copy renders a document, so the stage has to be told it is
+          showing one. Left as `doc` it would still be laid out as the
+          applications list — stretched to the full width instead of centred —
+          because you open a copy from that list and never leave it. */}
       {/* --cv-zoom lets the stage divide out its own padding: CSS `zoom` scales
           padding along with everything else, which otherwise walks the document
           further from the toolbar the more you zoom in. */}
-      <div className="cv-stage" data-zoom={zoom !== 1 ? '1' : undefined} data-doc={doc}
+      <div className="cv-stage" data-zoom={zoom !== 1 ? '1' : undefined}
+        data-doc={viewingSnapshot ? (viewingSnapshot.doc === 'letter' ? 'letter' : 'cv') : doc}
         style={zoom !== 1 ? { zoom, '--cv-zoom': zoom } : undefined}>
         {mainContent}
       </div>
