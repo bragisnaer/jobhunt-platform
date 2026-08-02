@@ -5124,7 +5124,7 @@ function ApplicationCard({ app, isActive, expanded, onToggle, onPatch, onDelete,
           {!app.isBase && app.postingUrl && <button onClick={() => window.open(app.postingUrl, '_blank', 'noopener')} title="Open posting in new tab">Open posting ↗</button>}
           <span style={{ flex: 1 }} />
           <button className="danger" onClick={onDelete} disabled={!canDelete}
-            title={canDelete ? 'Permanently delete this application' : 'Cannot delete the last Base — promote another application first'}>
+            title={canDelete ? 'Delete this application — undoable from the Applications list for a while afterwards' : 'Cannot delete the last Base — promote another application first'}>
             Delete
           </button>
         </div>
