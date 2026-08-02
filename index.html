@@ -541,6 +541,37 @@
   /* Job pack actions sit beside the primary button but must not compete with it. */
   .apps-header button.ghost { background: #fff; color: #2a2a26; border: 1px solid #d8d4cb; font-weight: 400; }
   .apps-header button.ghost:hover { background: #f5f3ee; border-color: #b8b2a6; }
+  /* Undo trail. In normal flow directly under the header rather than in the
+     fixed slot the sync banners own — two banners pinned to the same 92px is
+     how you get an undo nobody can click. It also sits in the one view where
+     both undoable actions are taken, so it is already on screen. */
+  .undo-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin: 0 4px 14px; padding: 8px 12px;
+    background: #fffdf6; border: 1px solid #ebe0c4; border-radius: 8px;
+    font-size: 13px; color: #2a2a26;
+  }
+  .undo-bar .undo-what { flex: 1; min-width: 180px; }
+  .undo-bar .undo-when { color: #8a857a; }
+  .undo-bar button {
+    background: #fff; color: #2a2a26; border: 1px solid #d8d4cb;
+    border-radius: 6px; padding: 5px 12px; font: inherit; font-size: 12px;
+    cursor: pointer; white-space: nowrap;
+    transition: background 120ms, border-color 120ms, color 120ms;
+  }
+  .undo-bar button:hover { background: #f5f3ee; border-color: #b8b2a6; }
+  .undo-bar button.primary { background: #c96442; color: #fff; border-color: #c96442; font-weight: 500; }
+  .undo-bar button.primary:hover { background: #b05732; border-color: #b05732; }
+  .undo-bar button.undo-clear {
+    background: transparent; border-color: transparent; color: #8a857a; text-decoration: underline;
+  }
+  .undo-bar button.undo-clear:hover { background: transparent; border-color: transparent; color: #c96442; }
+  .undo-more { position: relative; }
+  .undo-more .caret { margin-left: 4px; font-size: 10px; }
+  .undo-popover { left: auto; right: 0; min-width: 260px; }
+  .undo-popover .popover-chip { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .undo-popover .popover-chip .when { color: #8a857a; font-size: 11px; }
+  .undo-popover .undo-note { padding: 4px 10px 6px; color: #8a857a; font-size: 11px; line-height: 1.4; }
   .apps-empty { text-align: center; color: #8a857a; padding: 60px 20px; font-size: 14px; }
   .apps-empty .link { background: none; border: none; color: #c96442; cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
   .apps-empty .link:hover { color: #b05732; }
@@ -1654,6 +1685,144 @@ function sortAppsForList(apps) {
     if (!!b.isBase - !!a.isBase) return (b.isBase ? 1 : 0) - (a.isBase ? 1 : 0);
     return (b.updatedAt || '').localeCompare(a.updatedAt || '');
   });
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Undo — a short trail behind the two bulk-destructive actions
+// ════════════════════════════════════════════════════════════════
+// Until now the only guard on a destructive action was confirm(), and confirm()
+// is answered reflexively — the realisation that a pack was wrong, or that the
+// wrong row went, arrives a second after the dialog has gone. An undo works at
+// that moment instead of before it. There is no server behind this app, so
+// there is also nobody to ask for a restore; that absence is the argument for
+// keeping a local trail, not against it.
+//
+// The trail is deliberately shallow, because it is a copy of data the user may
+// believe they deleted. It holds the last UNDO_MAX_ENTRIES actions, expires
+// after UNDO_MAX_AGE_MS, and can be wiped on the spot from the Applications
+// view. Five is about one sitting's worth of mistakes — enough that a delete
+// two actions ago is still reachable — and a week is the outer edge of "I did
+// that recently"; past either, an entry has stopped being a safety net and
+// become an archive nobody asked for.
+//
+// Storage is split for the same reason headshots left localStorage in the first
+// place. A payload carries a whole CV blob and a headshot data URL, which would
+// eat the 5MB origin budget within a couple of entries, so payloads live in
+// IndexedDB under undo:<entryId>. Only the index — kind, count, a label, a
+// timestamp — sits in localStorage, where it can be read synchronously during
+// the first render so the Undo control is on screen in the frame the user looks
+// for it rather than a promise later.
+//
+// None of it goes into Back up / Restore, or into the folder-sync package, and
+// that is a decision rather than an oversight. A backup is a file people mail
+// to themselves and drop in a synced folder; putting undo entries in it would
+// walk copies of applications the user deleted out of the one place where
+// clearing site data can still reach them. It would also be meaningless at the
+// other end — "undo the delete of X" on a machine that never had X — and would
+// mean changing the shape of the export envelope, which onImport still gates on
+// schemaVersion === SCHEMA_VERSION by exact equality. Undo is local, recent and
+// disposable; a backup is portable and lean. Keep them apart.
+const UNDO_LOG_KEY = 'cv-undo-log';
+const undoPayloadKey = (entryId) => `undo:${entryId}`;
+const UNDO_MAX_ENTRIES = 5;
+const UNDO_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+const loadUndoLog = () => loadJson(UNDO_LOG_KEY,
+  v => Array.isArray(v) ? v.filter(e => e && e.id && e.kind && e.at) : undefined, []);
+const saveUndoLog = (list) => saveJson(UNDO_LOG_KEY, list);
+
+// Kept pure so the retention rules can be checked without a browser. It sorts
+// first rather than trusting the caller, so a log that was written out of order
+// still evicts the genuinely oldest entry. The evicted entries come back with
+// the kept ones because their IndexedDB payloads have to go too: an orphaned
+// payload is exactly the silent copy the cap exists to prevent.
+function pruneUndoEntries(list, now = Date.now()) {
+  const ordered = (list || []).slice()
+    .sort((a, b) => String(b && b.at || '').localeCompare(String(a && a.at || '')));
+  const kept = [];
+  const evicted = [];
+  for (const e of ordered) {
+    const at = Date.parse(e && e.at);
+    const stale = !Number.isFinite(at) || (now - at) > UNDO_MAX_AGE_MS;
+    if (stale || kept.length >= UNDO_MAX_ENTRIES) evicted.push(e);
+    else kept.push(e);
+  }
+  return { kept, evicted };
+}
+
+async function dropUndoPayloads(entries) {
+  for (const e of entries || []) {
+    if (e && e.id) await idbDel(undoPayloadKey(e.id));
+  }
+}
+
+// The payload is written before the index entry so the log can never advertise
+// an undo whose data was never stored.
+async function recordUndo(entry, payload) {
+  const id = genId();
+  await idbPut(undoPayloadKey(id), payload);
+  const { kept, evicted } = pruneUndoEntries([
+    { ...entry, id, at: new Date().toISOString() },
+    ...loadUndoLog(),
+  ]);
+  await dropUndoPayloads(evicted);
+  saveUndoLog(kept);
+  return kept;
+}
+
+const readUndoPayload = (entryId) => idbGet(undoPayloadKey(entryId));
+
+// An entry is spent once it has been acted on, whether or not every application
+// it named could be reached, and the stashed copy goes with it.
+async function dropUndoEntry(entryId) {
+  await idbDel(undoPayloadKey(entryId));
+  const kept = loadUndoLog().filter(e => e.id !== entryId);
+  saveUndoLog(kept);
+  return kept;
+}
+
+async function clearUndoLog() {
+  await dropUndoPayloads(loadUndoLog());
+  try { localStorage.removeItem(UNDO_LOG_KEY); } catch {}
+  return [];
+}
+
+// Expiry has to be enforced by something that runs on its own; hanging it off
+// the next write would leave a log written in March still sitting there in June
+// for anyone who deleted nothing in between.
+async function pruneUndoLogOnLoad() {
+  const { kept, evicted } = pruneUndoEntries(loadUndoLog());
+  if (evicted.length) {
+    await dropUndoPayloads(evicted);
+    saveUndoLog(kept);
+  }
+  return kept;
+}
+
+function undoEntryTitle(entry) {
+  if (!entry) return '';
+  if (entry.kind === 'import-pack') {
+    const n = entry.count || 0;
+    return `Imported ${n} application${n === 1 ? '' : 's'} from a job pack`;
+  }
+  return `Deleted ${entry.label || 'an application'}`;
+}
+
+const undoEntryAction = (entry) =>
+  (entry && entry.kind === 'import-pack') ? 'Undo import' : 'Undo delete';
+
+// Coarse on purpose: the only question this label has to answer is whether the
+// entry is the thing you just did or something from yesterday.
+function relativeTime(iso, now = Date.now()) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const mins = Math.floor((now - t) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
 }
 
 async function runMigrationIfNeeded() {
@@ -4783,9 +4952,60 @@ function NewApplicationForm({ apps, defaultForkId, onCancel, onSubmit }) {
   );
 }
 
+// The newest action gets a button, not a menu item: an undo you have to go
+// looking for is not an undo. Older entries are one click behind it, because a
+// strict undo stack would force you to reverse a delete you meant just to reach
+// the import you did not.
+function UndoBar({ log = [], onUndo, onClear }) {
+  const [open, setOpen] = React.useState(false);
+  const rootRef = React.useRef(null);
+  useClickOutside(rootRef, open, () => setOpen(false));
+  if (!log.length) return null;
+  const [newest, ...older] = log;
+  const now = Date.now();
+  const retention = `Only the last ${UNDO_MAX_ENTRIES} actions are kept, for ${Math.round(UNDO_MAX_AGE_MS / 86400000)} days.`;
+  return (
+    <div className="undo-bar">
+      <span className="undo-what">
+        {undoEntryTitle(newest)} <span className="undo-when">· {relativeTime(newest.at, now)}</span>
+      </span>
+      <button type="button" className="primary" onClick={() => onUndo(newest.id)}>
+        {undoEntryAction(newest)}
+      </button>
+      {older.length > 0 && (
+        <div className="undo-more" ref={rootRef}>
+          <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}>
+            {older.length} earlier<span className="caret">▾</span>
+          </button>
+          {open && (
+            <div className="chip-popover undo-popover">
+              {older.map(e => (
+                <button key={e.id} type="button" className="popover-chip"
+                  onClick={() => { setOpen(false); onUndo(e.id); }}>
+                  <span className="label">{undoEntryTitle(e)}</span>
+                  <span className="when">{undoEntryAction(e)} · {relativeTime(e.at, now)}</span>
+                </button>
+              ))}
+              <div className="popover-divider" />
+              <div className="undo-note">{retention}</div>
+            </div>
+          )}
+        </div>
+      )}
+      {/* Undo history is a copy of things you deleted, so the way to get rid of
+          it has to be in plain sight rather than behind the menu above. */}
+      <button type="button" className="undo-clear" onClick={onClear}
+        title={`Delete the copies kept for undo, now. ${retention}`}>
+        Clear history
+      </button>
+    </div>
+  );
+}
+
 function ApplicationsDocument({ apps, activeAppId, onView, onCreate,
                                 onPatch, onPromote, onDemote, onDuplicate, onDelete,
                                 onDownloadTemplate, onImportPack,
+                                undoLog, onUndo, onClearUndo,
                                 customStatuses, setCustomStatuses, setStatusOrder, onStatusDeleted }) {
   const packInputRef = React.useRef(null);
   const { statuses: allStatuses, byId: allStatusesById } = React.useContext(StatusesContext);
@@ -4888,6 +5108,7 @@ function ApplicationsDocument({ apps, activeAppId, onView, onCreate,
           onSubmit={onSubmitNew}
         />
       )}
+      <UndoBar log={undoLog} onUndo={onUndo} onClear={onClearUndo} />
       <div className="apps-filters">
         <div className="status-chips" role="group" aria-label="Filter by status">
           <button type="button"
@@ -5049,6 +5270,13 @@ function App() {
     return [meta];
   });
   React.useEffect(() => { saveAppsMeta(apps); }, [apps]);
+
+  // ── Undo trail ───────────────────────────────────────────────
+  // Seeded synchronously from localStorage because the whole point is that the
+  // control is there after a reload: "that pack was wrong" is a thought people
+  // have on the way back to the tab, not before they left it.
+  const [undoLog, setUndoLog] = React.useState(() => loadUndoLog());
+  React.useEffect(() => { pruneUndoLogOnLoad().then(setUndoLog); }, []);
 
   const [activeAppId, setActiveAppIdState] = React.useState(() => {
     const id = loadActiveAppId();
@@ -5433,6 +5661,15 @@ function App() {
       }));
     }
     setApps(prev => [...created, ...prev]);
+    // Import is purely additive, so its inverse is exact: delete these ids and
+    // nothing else. The record carries the updatedAt each application was born
+    // with, which is what later tells an untouched import apart from one the
+    // user has since edited — the CVs themselves are already on disk and need
+    // no copy, so this entry costs almost nothing to keep.
+    setUndoLog(await recordUndo(
+      { kind: 'import-pack', count: created.length },
+      { items: created.map(m => ({ id: m.id, updatedAt: m.updatedAt, label: appDisplayLabel(m) })) },
+    ));
   };
 
   const onImport = async (text) => {
@@ -5557,6 +5794,19 @@ function App() {
     return newId;
   };
 
+  // Anything that removes applications has to leave something on screen when
+  // the one it removed was the one open; a Base is the least surprising place
+  // to land. Shared by the delete button and by undoing a pack import, which
+  // can take the open application out from under the editor just as easily.
+  const reseatActiveApp = (removedIds) => {
+    if (!removedIds.has(activeAppId)) return;
+    const survivors = apps.filter(a => !removedIds.has(a.id));
+    const next = survivors.find(a => a.isBase) || survivors[0];
+    if (!next) return;
+    cvAppIdRef.current = null;
+    setActiveAppId(next.id);
+  };
+
   const onDeleteApp = async (id) => {
     const target = apps.find(a => a.id === id);
     if (!target) return;
@@ -5567,17 +5817,107 @@ function App() {
         return;
       }
     }
-    if (!confirm(`Delete "${appDisplayLabel(target)}"? This cannot be undone.`)) return;
+    if (!confirm(`Delete "${appDisplayLabel(target)}"?\n\nYou can undo this from the Applications list until you clear the undo history.`)) return;
+    // Read both halves before either is destroyed. An application is a CV blob
+    // in localStorage and headshot bytes in IndexedDB, and a stash that caught
+    // only the first would restore a CV with a hole where the face was.
+    const stashedCv = loadAppCv(id);
+    let stashedHeadshot = null;
+    try { stashedHeadshot = await idbGet(appHeadshotKeyV2(id)); } catch {}
     deleteAppCv(id);
     try { await idbDel(appHeadshotKeyV2(id)); } catch {}
     setApps(prev => prev.filter(a => a.id !== id));
-    if (activeAppId === id) {
-      const next = apps.find(a => a.id !== id && a.isBase) || apps.find(a => a.id !== id);
-      if (next) {
-        cvAppIdRef.current = null;
-        setActiveAppId(next.id);
-      }
+    reseatActiveApp(new Set([id]));
+    setUndoLog(await recordUndo(
+      { kind: 'delete-app', label: appDisplayLabel(target), count: 1 },
+      { meta: target, cv: stashedCv, headshot: stashedHeadshot },
+    ));
+  };
+
+  // Undoing an import is itself destructive, so it confirms and reports; each
+  // handler returns whether the entry has been spent, so a cancelled confirm
+  // leaves the undo where it was instead of quietly burning it.
+  const undoPackImport = async (payload) => {
+    const items = (payload && payload.items) || [];
+    // Precision is the whole point: only ids this import created, and only
+    // those still exactly as it created them. An application edited since is
+    // the user's own work — "remove what I just added" is not permission to
+    // throw that away. A Base is skipped for the same reason, and because the
+    // list has to keep one.
+    const removable = [];
+    let editedSince = 0;
+    let alreadyGone = 0;
+    for (const it of items) {
+      const live = apps.find(a => a.id === it.id);
+      if (!live) { alreadyGone++; continue; }
+      if (live.isBase || live.updatedAt !== it.updatedAt) editedSince++;
+      else removable.push(live);
     }
+    if (!removable.length) {
+      alert(editedSince
+        ? `Nothing to undo: all ${editedSince} application(s) from that import have been edited since, so they are left alone. Delete them one by one if you want them gone.`
+        : 'Nothing to undo — those applications are already gone.');
+      return true;
+    }
+    const notes = [
+      editedSince ? `${editedSince} of them have been edited since and will be kept.` : '',
+      alreadyGone ? `${alreadyGone} were already deleted.` : '',
+    ].filter(Boolean).join('\n');
+    if (!confirm(
+      `Remove ${removable.length} application(s) that job pack added?\n\n`
+      + removable.map(a => `• ${appDisplayLabel(a)}`).join('\n')
+      + `\n\n${notes}${notes ? '\n\n' : ''}Nothing else is touched.`
+    )) return false;
+    const ids = new Set(removable.map(a => a.id));
+    for (const id of ids) {
+      deleteAppCv(id);
+      try { await idbDel(appHeadshotKeyV2(id)); } catch {}
+    }
+    setApps(prev => prev.filter(a => !ids.has(a.id)));
+    reseatActiveApp(ids);
+    return true;
+  };
+
+  // Restoring is not destructive, so it just happens — a confirm here would be
+  // the confirm habit that made undo necessary in the first place.
+  const undoAppDeletion = async (payload) => {
+    const meta = payload && payload.meta;
+    if (!meta || !meta.id) {
+      alert('That undo entry is incomplete — the application cannot be put back.');
+      return true;
+    }
+    if (apps.some(a => a.id === meta.id)) return true;
+    if (payload.cv) saveAppCv(meta.id, payload.cv);
+    if (payload.headshot) {
+      try { await idbPut(appHeadshotKeyV2(meta.id), payload.headshot); } catch {}
+    }
+    // The id comes back with it, so links, the active-application pointer and
+    // the headshot key all still refer to the same application they did before.
+    // Checked against `prev` rather than the captured list because two quick
+    // clicks on Undo would otherwise both pass the check above and put the same
+    // application in the list twice.
+    setApps(prev => prev.some(a => a.id === meta.id) ? prev : [meta, ...prev]);
+    return true;
+  };
+
+  const onUndo = async (entryId) => {
+    const entry = undoLog.find(e => e.id === entryId);
+    if (!entry) return;
+    const payload = await readUndoPayload(entryId);
+    if (!payload) {
+      alert('That undo is no longer available — the copy it needed has been cleared.');
+      setUndoLog(await dropUndoEntry(entryId));
+      return;
+    }
+    const spent = entry.kind === 'import-pack'
+      ? await undoPackImport(payload)
+      : await undoAppDeletion(payload);
+    if (spent) setUndoLog(await dropUndoEntry(entryId));
+  };
+
+  const onClearUndo = async () => {
+    if (!confirm('Clear undo history?\n\nThe copies kept for undo are deleted straight away, and the actions in the list can no longer be reversed.')) return;
+    setUndoLog(await clearUndoLog());
   };
 
   const noop = () => {};
@@ -5621,6 +5961,7 @@ function App() {
         onDemote={onDemoteFromBase}
         onDuplicate={onDuplicateApp}
         onDelete={onDeleteApp}
+        undoLog={undoLog} onUndo={onUndo} onClearUndo={onClearUndo}
         customStatuses={customStatuses}
         setCustomStatuses={setCustomStatuses}
         setStatusOrder={setStatusOrder}
