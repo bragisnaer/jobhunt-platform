@@ -31,9 +31,55 @@ required after the first load (see [Third-party assets](#third-party-assets)).
 - **Print to PDF** via your browser's print dialog. Filenames follow
   `<Name>_<CV|Cover-Letter>_<Application>`.
 - **Export / import JSON** — your data, in a file you own.
+- **Job packs** — bulk-create applications from a JSON file. Download a template pre-filled with your own
+  CV, have something (or someone) tailor a batch of applications into it, import, and they appear alongside
+  what you already have. See below.
 - **Optional folder sync** — bind the app to a local folder and it writes `cv-data.json` plus an
   `images/` directory alongside `index.html`. Put that folder in Dropbox or OneDrive and your CV
   follows you between machines. Chromium-only; see below.
+
+## Job packs
+
+If you tailor several applications at once — by hand or with an AI reading job adverts — retyping each
+one into the app is the slow part. A job pack skips it.
+
+1. **Applications → Job pack template** downloads a JSON file. It is pre-filled with your base CV's real
+   summary and experience, and annotated throughout with instructions for whoever fills it in.
+2. Fill in one entry per job. If you are handing this to an AI, the file already tells it what each field
+   is for, that it must not invent employers or achievements, and how the cover letter should be written.
+3. **Applications → Import pack** adds them. You get a preview of exactly what will be created before
+   anything is written.
+
+The format carries **only what changes**. Each entry forks your base CV and merges its fields over the
+top, so a pack that rewrites the profile paragraph and the cover letter leaves your experience, education,
+skills, theme, and template exactly as you set them. Fields you omit are inherited, which also means a
+sparse pack cannot damage anything.
+
+```json
+{
+  "jobPack": 1,
+  "basedOn": "Base CV",
+  "applications": [
+    {
+      "company": "Northwind Logistics",
+      "position": "Head of Operations",
+      "postingUrl": "https://example.com/jobs/42",
+      "status": "applied",
+      "notes": "Referral: Sam. Deadline Friday.",
+      "cv": { "summary": "Operations leader with ..." },
+      "coverLetter": {
+        "subject": "Application for Head of Operations",
+        "body": "First paragraph.\n\nSecond paragraph."
+      }
+    }
+  ]
+}
+```
+
+**Import is additive and never destructive** — unlike Restore, which replaces your whole dataset. Existing
+applications are never modified or deleted, and a malformed pack is rejected with an error naming the entry
+that is wrong rather than half-importing. Keys beginning with `_` are documentation and are stripped on
+import, so the instructions can never end up on a CV.
 
 ## Keeping a copy of your data
 

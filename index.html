@@ -537,6 +537,10 @@
   .apps-header h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
   .apps-header button { background: #c96442; color: #fff; border: none; border-radius: 6px; padding: 8px 14px; font: inherit; font-size: 13px; cursor: pointer; font-weight: 500; }
   .apps-header button:hover { background: #b05732; }
+  .apps-header-actions { display: flex; align-items: center; gap: 8px; }
+  /* Job pack actions sit beside the primary button but must not compete with it. */
+  .apps-header button.ghost { background: #fff; color: #2a2a26; border: 1px solid #d8d4cb; font-weight: 400; }
+  .apps-header button.ghost:hover { background: #f5f3ee; border-color: #b8b2a6; }
   .apps-empty { text-align: center; color: #8a857a; padding: 60px 20px; font-size: 14px; }
   .apps-empty .link { background: none; border: none; color: #c96442; cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
   .apps-empty .link:hover { color: #b05732; }
@@ -1471,6 +1475,178 @@ function appDisplayLabel(app) {
   const parts = [(app.company || '').trim(), (app.position || '').trim()].filter(Boolean);
   if (parts.length) return parts.join(' — ');
   return 'Untitled application';
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Job packs — bulk-create applications from a JSON file
+// ════════════════════════════════════════════════════════════════
+// Back up / Restore moves the whole dataset and replaces what is there. That is
+// the wrong shape for the common case: you have had something tailor three or
+// four applications for you and want them added to the twenty you already have.
+//
+// A job pack carries deltas, not documents. Each entry names the tracker fields
+// and an optional partial `cv`, which is deep-merged over a fork of your base
+// application — so anything the pack does not mention keeps the wording, the
+// sections, the theme and the template you already chose. That is also what
+// makes the format safe to hand to an AI: it edits values in place instead of
+// reproducing a CV schema it has to guess at, and a field it omits is a field
+// it cannot damage.
+const JOB_PACK_VERSION = 1;
+// The file is written to be read by whoever fills it in, which is usually a
+// language model working from nothing but this JSON. Keys starting with an
+// underscore are documentation: the importer strips them, so instructions can
+// sit anywhere without risk of being merged into a CV.
+const JOB_PACK_INSTRUCTIONS = {
+  whatThisIs: 'A job pack for JobHunt Platform. Each entry becomes one job application, with its own tailored CV and cover letter, in a CV editor the human already uses.',
+  howToFillItIn: [
+    'Copy the single entry in "applications" once per job you are applying to, and fill each one in.',
+    'Write in the first person, as the applicant. Never invent employers, dates, qualifications or numbers — you may only rewrite and reprioritise what is already in this file.',
+    'Every field is optional except company or position. Whatever you leave out is inherited unchanged from the base CV, so delete any field you are not tailoring rather than repeating it.',
+    'Keep the JSON valid: no trailing commas, no comments, straight quotes only.',
+  ],
+  fields: {
+    company: 'The employer name, exactly as it should appear in the tracker and the letter. Required unless position is set.',
+    position: 'The role title as advertised.',
+    postingUrl: 'Link to the advert, so the human can reopen it later. Leave "" if you do not have one.',
+    status: 'Where this sits in the pipeline. Use "drafting" unless told otherwise.',
+    notes: 'Anything the human should know before sending: deadline, referral name, salary range, what you emphasised and why.',
+    'cv.summary': 'Replaces the profile paragraph at the top of the CV. 2-4 sentences, aimed at this specific role. Lead with the experience the advert asks for.',
+    'cv.experience': 'Replaces the whole experience list, so keep every job that is already here and edit inside it. Reword and reorder bullets to match the advert; you may drop a weak bullet, but never add an achievement that is not already somewhere in this file.',
+    'coverLetter.recipient': 'Hiring manager name, title, company and address if the advert gives them. Leave "" for any you do not know.',
+    'coverLetter.subject': 'One line, e.g. "Application for Head of Operations".',
+    'coverLetter.salutation': 'e.g. "Dear Hiring Manager," or the named person if you have one.',
+    'coverLetter.body': 'The letter itself, plain text. Separate paragraphs with a blank line. Three or four paragraphs: why this company, what you have done that matches, what you would do in the role. No markdown headings and no bullet characters.',
+    'coverLetter.signoff': 'e.g. "Sincerely," — the name is added automatically.',
+  },
+  formatting: [
+    'Plain text only. No markdown, no HTML.',
+    'A bare URL or email address becomes a clickable link automatically.',
+    'Write [label](https://example.com) to link chosen words instead of showing the raw URL.',
+    'A cover letter longer than one page flows onto a second — aim for one.',
+  ],
+  whatHappensOnImport: 'Each entry forks the base CV named in "basedOn", applies your fields over it, and appears as a new application. Applications the human already has are never modified or deleted.',
+};
+
+// Built from the live base CV rather than from a static skeleton: the point is
+// that the writer edits real sentences, so the shape can never drift from the
+// shape the importer expects.
+function buildJobPackTemplate(baseCv, baseLabel) {
+  const cv = baseCv || {};
+  const cl = cv.coverLetter || {};
+  return {
+    jobPack: JOB_PACK_VERSION,
+    _instructions: JOB_PACK_INSTRUCTIONS,
+    basedOn: baseLabel || '',
+    applications: [{
+      _hint: 'Duplicate this whole object once per application. Fields left as "" are inherited from the base CV.',
+      company: 'Company name',
+      position: 'Role title',
+      postingUrl: '',
+      status: 'drafting',
+      notes: '',
+      cv: {
+        _hint: 'summary and experience below are the current base CV, copied here so you can edit them in place. Delete either one to leave it untouched.',
+        summary: cv.summary || '',
+        experience: JSON.parse(JSON.stringify(cv.experience || [])),
+      },
+      coverLetter: {
+        recipient: { name: '', title: '', company: '', address: '' },
+        subject: cl.subject || '',
+        salutation: cl.salutation || '',
+        body: cl.body || '',
+        signoff: cl.signoff || '',
+      },
+    }],
+  };
+}
+
+// The instructions in the template are addressed to whoever fills the pack in,
+// and a model that has been told to edit values in place will sometimes keep the
+// _hint next to them. Stripping every underscore key on the way in means the
+// documentation can never end up rendered on somebody's CV.
+function stripDocKeys(value) {
+  if (Array.isArray(value)) return value.map(stripDocKeys);
+  if (!value || typeof value !== 'object') return value;
+  const out = {};
+  for (const k in value) {
+    if (k.startsWith('_')) continue;
+    out[k] = stripDocKeys(value[k]);
+  }
+  return out;
+}
+
+// Returns { ok, entries, errors, basedOn }. Errors name the entry by its position
+// in the file, because a pack is usually machine-written and the writer needs to
+// know which of five entries it got wrong.
+function parseJobPack(text) {
+  const fail = (msg) => ({ ok: false, entries: [], errors: [msg], basedOn: '' });
+  let parsed;
+  try { parsed = JSON.parse(text); }
+  catch (e) { return fail(`That file is not valid JSON (${e.message}).`); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return fail('A job pack must be a JSON object.');
+  }
+  if (parsed.schemaVersion && !parsed.jobPack) {
+    return fail('That looks like a full backup, not a job pack. Use Restore for backups — it replaces everything.');
+  }
+  if (Number(parsed.jobPack) !== JOB_PACK_VERSION) {
+    return fail(`Unsupported job pack version: ${JSON.stringify(parsed.jobPack)}. This build reads version ${JOB_PACK_VERSION}.`);
+  }
+  if (!Array.isArray(parsed.applications) || !parsed.applications.length) {
+    return fail('This pack has no "applications" array, or it is empty.');
+  }
+  const errors = [];
+  const entries = [];
+  parsed.applications.forEach((raw, i) => {
+    const at = `Entry ${i + 1}`;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      errors.push(`${at}: not an object.`);
+      return;
+    }
+    const company = typeof raw.company === 'string' ? raw.company.trim() : '';
+    const position = typeof raw.position === 'string' ? raw.position.trim() : '';
+    if (!company && !position) {
+      errors.push(`${at}: needs a company or a position.`);
+      return;
+    }
+    const isPlainObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
+    if (raw.cv !== undefined && !isPlainObject(raw.cv)) {
+      errors.push(`${at}: "cv" must be an object of fields to override.`);
+      return;
+    }
+    if (raw.coverLetter !== undefined && !isPlainObject(raw.coverLetter)) {
+      errors.push(`${at}: "coverLetter" must be an object.`);
+      return;
+    }
+    entries.push({
+      company, position,
+      postingUrl: typeof raw.postingUrl === 'string' ? raw.postingUrl : '',
+      notes: typeof raw.notes === 'string' ? raw.notes : '',
+      status: typeof raw.status === 'string' ? raw.status : '',
+      overrides: stripDocKeys({
+        ...(raw.cv || {}),
+        ...(raw.coverLetter ? { coverLetter: raw.coverLetter } : {}),
+      }),
+    });
+  });
+  return {
+    ok: errors.length === 0 && entries.length > 0,
+    entries, errors,
+    basedOn: typeof parsed.basedOn === 'string' ? parsed.basedOn.trim() : '',
+  };
+}
+
+// The anchor must be in the document and the object URL must outlive the click,
+// or Firefox silently drops the download.
+function downloadJson(filename, payload) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
 }
 
 function sortAppsForList(apps) {
@@ -4609,7 +4785,9 @@ function NewApplicationForm({ apps, defaultForkId, onCancel, onSubmit }) {
 
 function ApplicationsDocument({ apps, activeAppId, onView, onCreate,
                                 onPatch, onPromote, onDemote, onDuplicate, onDelete,
+                                onDownloadTemplate, onImportPack,
                                 customStatuses, setCustomStatuses, setStatusOrder, onStatusDeleted }) {
+  const packInputRef = React.useRef(null);
   const { statuses: allStatuses, byId: allStatusesById } = React.useContext(StatusesContext);
   const [expandedId, setExpandedId] = React.useState(null);
   const [showForm, setShowForm] = React.useState(false);
@@ -4677,11 +4855,30 @@ function ApplicationsDocument({ apps, activeAppId, onView, onCreate,
     <div className="apps-shell">
       <div className="apps-header">
         <h2>Applications</h2>
-        {!showForm && (
-          <button onClick={() => setShowForm(true)} title="Start a new application by forking an existing one">
-            + New application
+        <span className="apps-header-actions">
+          <button type="button" className="ghost" onClick={onDownloadTemplate}
+            title="Download a JSON job pack, pre-filled from your base CV and annotated for whoever fills it in">
+            Job pack template
           </button>
-        )}
+          <button type="button" className="ghost" onClick={() => packInputRef.current && packInputRef.current.click()}
+            title="Add applications from a filled-in job pack. Your existing applications are left alone.">
+            Import pack
+          </button>
+          {/* Cleared after every pick so choosing the same file twice still fires. */}
+          <input type="file" accept="application/json,.json" ref={packInputRef}
+            style={{ display: 'none' }}
+            onChange={async (e) => {
+              const file = e.target.files && e.target.files[0];
+              e.target.value = '';
+              if (!file) return;
+              onImportPack(await file.text());
+            }} />
+          {!showForm && (
+            <button onClick={() => setShowForm(true)} title="Start a new application by forking an existing one">
+              + New application
+            </button>
+          )}
+        </span>
       </div>
       {showForm && (
         <NewApplicationForm
@@ -5174,17 +5371,68 @@ function App() {
       try { headshot = await idbGet(appHeadshotKeyV2(meta.id)); } catch {}
       payload.apps.push({ meta, cv: cvBlob, headshot });
     }
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
     const namePart = slug(cv.name) || 'CV';
-    a.href = url; a.download = `${namePart}_All-Applications_${new Date().toISOString().slice(0, 10)}.json`;
-    // The anchor must be in the document and the object URL must outlive the
-    // click, or Firefox silently drops the download.
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+    downloadJson(`${namePart}_All-Applications_${new Date().toISOString().slice(0, 10)}.json`, payload);
+  };
+
+  // Hands the writer a pack already filled with the base CV's own words, so the
+  // job is editing sentences rather than guessing at a schema.
+  const onDownloadJobPackTemplate = () => {
+    const base = apps.find(a => a.isBase) || apps[0];
+    const baseCv = (base && loadAppCv(base.id)) || cv;
+    const namePart = slug(cv.name) || 'CV';
+    downloadJson(`${namePart}_Job-Pack-Template.json`,
+      buildJobPackTemplate(baseCv, appDisplayLabel(base)));
+  };
+
+  // Additive, unlike Restore: every entry becomes a new application and nothing
+  // already on the machine is touched. The preview exists because a pack is
+  // usually machine-written, and reading back what it understood is the cheapest
+  // moment to catch a hallucinated employer.
+  const onImportJobPack = async (text) => {
+    const pack = parseJobPack(text);
+    if (!pack.ok) {
+      alert(`Could not read that job pack:\n\n${pack.errors.join('\n')}`);
+      return;
+    }
+    const source = pack.basedOn
+      ? apps.find(a => appDisplayLabel(a) === pack.basedOn)
+      : null;
+    const base = source || apps.find(a => a.isBase) || apps[0];
+    if (!base) { alert('There is no application to base these on.'); return; }
+    const lines = pack.entries.map((e, i) =>
+      `${i + 1}. ${[e.company, e.position].filter(Boolean).join(' — ')}`);
+    const basedOnNote = pack.basedOn && !source
+      ? `\n\nNote: the pack asks for "${pack.basedOn}", which is not here. Using ${appDisplayLabel(base)} instead.`
+      : '';
+    if (!confirm(
+      `Add ${pack.entries.length} application(s), based on ${appDisplayLabel(base)}?\n\n`
+      + `${lines.join('\n')}\n\nYour existing applications are left alone.${basedOnNote}`
+    )) return;
+
+    const baseCv = loadAppCv(base.id) || SEED_CV;
+    let baseHeadshot = null;
+    try { baseHeadshot = await idbGet(appHeadshotKeyV2(base.id)); } catch {}
+    const knownStatus = new Set(allStatuses.map(s => s.id));
+    const created = [];
+    for (const entry of pack.entries) {
+      const id = genId();
+      // Fork first, then merge: deepMerge leaves untouched branches alone, so a
+      // pack that only rewrites the summary keeps every other section verbatim.
+      const forked = deepMerge(JSON.parse(JSON.stringify(baseCv)), entry.overrides);
+      saveAppCv(id, forked);
+      if (baseHeadshot) {
+        try { await idbPut(appHeadshotKeyV2(id), baseHeadshot); } catch {}
+      }
+      created.push(makeAppMeta({
+        id, isBase: false,
+        company: entry.company, position: entry.position,
+        status: knownStatus.has(entry.status) ? entry.status : 'drafting',
+        postingUrl: entry.postingUrl, notes: entry.notes,
+        headshotKey: appHeadshotKeyV2(id),
+      }));
+    }
+    setApps(prev => [...created, ...prev]);
   };
 
   const onImport = async (text) => {
@@ -5366,6 +5614,8 @@ function App() {
         apps={apps} activeAppId={activeAppId}
         onView={onOpenApplication}
         onCreate={onCreateApplication}
+        onDownloadTemplate={onDownloadJobPackTemplate}
+        onImportPack={onImportJobPack}
         onPatch={onPatchApp}
         onPromote={onPromoteToBase}
         onDemote={onDemoteFromBase}
