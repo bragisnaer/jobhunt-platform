@@ -5987,7 +5987,16 @@ function App() {
     setSyncState('idle');
   };
 
-  const slug = (s) => (s || '').trim().replace(/\s+/g, '-').replace(/[^A-Za-z0-9\-]/g, '');
+  // Filenames stay ASCII because some application portals reject anything else,
+  // but letters are spelled out rather than dropped: "Snær" must not become "Snr".
+  // Letters with no decomposition are mapped by hand; accents are then split off
+  // and discarded, so "é" keeps its "e".
+  const ASCII_LETTERS = { æ: 'ae', Æ: 'Ae', ø: 'oe', Ø: 'Oe', å: 'aa', Å: 'Aa',
+    ð: 'd', Ð: 'D', þ: 'th', Þ: 'Th', ß: 'ss', œ: 'oe', Œ: 'Oe', ł: 'l', Ł: 'L' };
+  const slug = (s) => (s || '').trim()
+    .replace(/[æÆøØåÅðÐþÞßœŒłŁ]/g, c => ASCII_LETTERS[c])
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, '-').replace(/[^A-Za-z0-9\-]/g, '');
   const outputBase = () => {
     if (viewingSnapshot) {
       const namePart = slug((viewingSnapshot.cv && viewingSnapshot.cv.name) || cv.name) || 'Untitled';
