@@ -1563,6 +1563,17 @@ function appDisplayLabel(app) {
 // reproducing a CV schema it has to guess at, and a field it omits is a field
 // it cannot damage.
 const JOB_PACK_VERSION = 1;
+// The main-column content a pack may tailor. Sidebar content is added on top of
+// this per CV, because its keys depend on which sections the base has.
+const JOB_PACK_CONTENT_KEYS = ['title', 'summary', 'metrics', 'experience', 'education', 'honours'];
+// Who the applicant is and how their CV looks are not per-job decisions, and a
+// model filling in a pack has no business guessing at them: one wrong digit in
+// an email address costs the application. These are dropped on import whatever
+// the pack says. `sidebar` and `sectionOrder` are reached through cv.sections
+// instead, which can rename and show/hide but cannot break the structure.
+const JOB_PACK_PROTECTED_CV_KEYS = ['name', 'contact', 'headshot', 'theme', 'templateId',
+  'showCredit', 'creditText', 'sidebar', 'sectionOrder'];
+const JOB_PACK_PROTECTED_LETTER_KEYS = ['sender', 'signName'];
 // The file is written to be read by whoever fills it in, which is usually a
 // language model working from nothing but this JSON. Keys starting with an
 // underscore are documentation: the importer strips them, so instructions can
@@ -1581,14 +1592,21 @@ const JOB_PACK_INSTRUCTIONS = {
     postingUrl: 'Link to the advert, so the human can reopen it later. Leave "" if you do not have one.',
     status: 'Where this sits in the pipeline. Use "drafting" unless told otherwise.',
     notes: 'Anything the human should know before sending: deadline, referral name, salary range, what you emphasised and why.',
+    'cv.title': 'The headline under the name, e.g. "Regional Operations Manager · BA". You may angle it towards the role, but it must stay true to the experience below.',
     'cv.summary': 'Replaces the profile paragraph at the top of the CV. 2-4 sentences, aimed at this specific role. Lead with the experience the advert asks for.',
+    'cv.metrics': 'The row of headline numbers under the profile. Each has a value, a unit and a label. Choose and reorder the ones that matter most for this role; never change a number or add one that is not already in this file. An empty list removes the row.',
     'cv.experience': 'Replaces the whole experience list, so keep every job that is already here and edit inside it. Reword and reorder bullets to match the advert; you may drop a weak bullet, but never add an achievement that is not already somewhere in this file.',
+    'cv.education / cv.honours': 'Replace their whole lists. Keep every entry; you may reword the notes and text to stress what is relevant.',
+    'cv.<sidebar lists>': 'Every other list under "cv" is the content of one sidebar section — "cv.sections" says which heading each one sits under. Each replaces its whole list. Reorder so the most relevant items come first, and drop ones that do not help; add an item only if it is already evidenced elsewhere in this file. For languages, set "level" only — the bar fills from it.',
+    'cv.sections': 'Every section of the CV by id, with its heading and whether it is shown. Rename a heading or set "visible" to false to hide a section for this role (and true to show a hidden one). Ids cannot be added or changed.',
     'coverLetter.recipient': 'Hiring manager name, title, company and address if the advert gives them. Leave "" for any you do not know.',
     'coverLetter.subject': 'One line, e.g. "Application for Head of Operations".',
     'coverLetter.salutation': 'e.g. "Dear Hiring Manager," or the named person if you have one.',
     'coverLetter.body': 'The letter itself, plain text. Separate paragraphs with a blank line. Three or four paragraphs: why this company, what you have done that matches, what you would do in the role. No markdown headings and no bullet characters.',
     'coverLetter.signoff': 'e.g. "Sincerely," — the name is added automatically.',
+    'coverLetter.date': 'Leave "" to print the date the letter is opened. Set it only if the human asks for a fixed date.',
   },
+  notEditable: 'The name, contact details, letter sender block, photo, colours and template belong to the human and are not in this file. If you add them anyway they are ignored on import.',
   formatting: [
     'Plain text only. No markdown, no HTML.',
     'A bare URL or email address becomes a clickable link automatically.',
@@ -1604,6 +1622,28 @@ const JOB_PACK_INSTRUCTIONS = {
 function buildJobPackTemplate(baseCv, baseLabel) {
   const cv = baseCv || {};
   const cl = cv.coverLetter || {};
+  const copy = (v) => JSON.parse(JSON.stringify(v));
+  const content = {};
+  for (const key of JOB_PACK_CONTENT_KEYS) {
+    if (cv[key] !== undefined) content[key] = copy(cv[key]);
+  }
+  // Sidebar content sits at whatever key each section resolves to, which for a
+  // duplicated section is a generated one — so walk the sections rather than
+  // trusting a fixed list.
+  for (const meta of cv.sidebar || []) {
+    const key = sidebarDataKey(meta);
+    if (key && !(key in content) && cv[key] !== undefined) content[key] = copy(cv[key]);
+  }
+  const sections = {};
+  for (const s of ensureSectionOrder(cv)) {
+    const meta = (cv.sidebar || []).find(m => m.id === s.id);
+    if (!isMainSectionId(s.id) && !meta) continue;
+    sections[s.id] = {
+      title: sectionDisplayTitle(s.id, cv),
+      visible: !!s.visible,
+      ...(meta ? { _contentIn: `cv.${sidebarDataKey(meta)}` } : {}),
+    };
+  }
   return {
     jobPack: JOB_PACK_VERSION,
     _instructions: JOB_PACK_INSTRUCTIONS,
@@ -1616,12 +1656,13 @@ function buildJobPackTemplate(baseCv, baseLabel) {
       status: 'drafting',
       notes: '',
       cv: {
-        _hint: 'summary and experience below are the current base CV, copied here so you can edit them in place. Delete either one to leave it untouched.',
-        summary: cv.summary || '',
-        experience: JSON.parse(JSON.stringify(cv.experience || [])),
+        _hint: 'Everything below is the current base CV, copied here so you can edit it in place. Delete any field you are not tailoring to leave it untouched.',
+        ...content,
+        sections,
       },
       coverLetter: {
         recipient: { name: '', title: '', company: '', address: '' },
+        date: '',
         subject: cl.subject || '',
         salutation: cl.salutation || '',
         body: cl.body || '',
@@ -1689,15 +1730,31 @@ function parseJobPack(text) {
       errors.push(`${at}: "coverLetter" must be an object.`);
       return;
     }
+    const cvFields = stripDocKeys(raw.cv || {});
+    for (const k of JOB_PACK_PROTECTED_CV_KEYS) delete cvFields[k];
+    const sections = cvFields.sections;
+    delete cvFields.sections;
+    if (sections !== undefined) {
+      const bad = !isPlainObject(sections) ? ['"cv.sections" must be an object keyed by section id.']
+        : Object.entries(sections).flatMap(([id, s]) =>
+            !isPlainObject(s) ? [`section "${id}" must be an object.`]
+            : (s.title !== undefined && typeof s.title !== 'string') ? [`section "${id}": "title" must be text.`]
+            : (s.visible !== undefined && typeof s.visible !== 'boolean') ? [`section "${id}": "visible" must be true or false.`]
+            : []);
+      if (bad.length) {
+        errors.push(...bad.map(b => `${at}: ${b}`));
+        return;
+      }
+    }
+    const letter = raw.coverLetter ? stripDocKeys(raw.coverLetter) : null;
+    if (letter) for (const k of JOB_PACK_PROTECTED_LETTER_KEYS) delete letter[k];
     entries.push({
       company, position,
       postingUrl: typeof raw.postingUrl === 'string' ? raw.postingUrl : '',
       notes: typeof raw.notes === 'string' ? raw.notes : '',
       status: typeof raw.status === 'string' ? raw.status : '',
-      overrides: stripDocKeys({
-        ...(raw.cv || {}),
-        ...(raw.coverLetter ? { coverLetter: raw.coverLetter } : {}),
-      }),
+      overrides: { ...cvFields, ...(letter ? { coverLetter: letter } : {}) },
+      sections: sections ? stripDocKeys(sections) : null,
     });
   });
   return {
@@ -1705,6 +1762,67 @@ function parseJobPack(text) {
     entries, errors,
     basedOn: typeof parsed.basedOn === 'string' ? parsed.basedOn.trim() : '',
   };
+}
+
+// parseJobPack cannot know what shape a field should have — that depends on the
+// base CV the pack lands on. This compares each override against the base's own
+// value: a list must stay a list, text must stay text, and every item in a list
+// must look like the base's first item. Anything the base has no example of is
+// let through. Returns error strings naming the path, e.g. `cv.metrics[2]`.
+function packShapeErrors(value, sample, path) {
+  if (sample === undefined || sample === null) return [];
+  const kind = (v) => Array.isArray(v) ? 'a list' : v === null ? 'empty'
+    : typeof v === 'object' ? 'an object' : typeof v === 'string' ? 'text' : typeof v === 'number' ? 'a number'
+    : typeof v === 'boolean' ? 'true or false' : typeof v;
+  if (kind(value) !== kind(sample)) return [`${path} must be ${kind(sample)}, not ${kind(value)}.`];
+  if (Array.isArray(sample)) {
+    const first = sample.find(x => x !== undefined && x !== null);
+    return value.flatMap((v, i) => packShapeErrors(v, first, `${path}[${i}]`));
+  }
+  if (typeof sample === 'object') {
+    return Object.keys(value).flatMap(k => packShapeErrors(value[k], sample[k], `${path}.${k}`));
+  }
+  return [];
+}
+
+// Errors for one parsed entry against the CV it will be forked from: field
+// shapes, and section ids the base does not have.
+function checkPackEntryAgainst(entry, baseCv) {
+  const errors = [];
+  for (const k of Object.keys(entry.overrides)) {
+    const path = k === 'coverLetter' ? 'coverLetter' : `cv.${k}`;
+    errors.push(...packShapeErrors(entry.overrides[k], baseCv[k], path));
+  }
+  if (entry.sections) {
+    const known = new Set(ensureSectionOrder(baseCv).map(s => s.id));
+    for (const id of Object.keys(entry.sections)) {
+      if (!known.has(id)) errors.push(`cv.sections has "${id}", which the base CV does not have.`);
+    }
+  }
+  return errors;
+}
+
+// Renames and shows/hides sections on an already-forked CV. Main-section
+// headings live in sectionTitles and sidebar headings on the sidebar entry;
+// visibility lives in sectionOrder, with the sidebar's legacy flag kept in step.
+function applyPackSections(cv, sections) {
+  if (!sections) return cv;
+  const order = ensureSectionOrder(cv).map(s =>
+    typeof (sections[s.id] || {}).visible === 'boolean' ? { ...s, visible: sections[s.id].visible } : s);
+  const sectionTitles = { ...(cv.sectionTitles || {}) };
+  for (const id of MAIN_SECTION_IDS) {
+    if (sections[id] && typeof sections[id].title === 'string') sectionTitles[id] = sections[id].title;
+  }
+  const sidebar = (cv.sidebar || []).map(m => {
+    const s = sections[m.id];
+    if (!s) return m;
+    return {
+      ...m,
+      ...(typeof s.title === 'string' ? { title: s.title } : {}),
+      ...(typeof s.visible === 'boolean' ? { visible: s.visible } : {}),
+    };
+  });
+  return { ...cv, sectionOrder: order, sectionTitles, sidebar };
 }
 
 // The anchor must be in the document and the object URL must outlive the click,
@@ -5919,10 +6037,15 @@ function App() {
 
   // Hands the writer a pack already filled with the base CV's own words, so the
   // job is editing sentences rather than guessing at a schema.
+  // With more than one base — yours, and one you keep for someone you are
+  // helping — the template follows whichever base is open, so opening theirs
+  // and clicking the button is all it takes. Otherwise it is the first base.
   const onDownloadJobPackTemplate = () => {
-    const base = apps.find(a => a.isBase) || apps[0];
-    const baseCv = (base && loadAppCv(base.id)) || cv;
-    const namePart = slug(cv.name) || 'CV';
+    const active = apps.find(a => a.id === activeAppId);
+    const base = (active && active.isBase) ? active : (apps.find(a => a.isBase) || apps[0]);
+    // The open CV's in-memory state is newer than its stored copy.
+    const baseCv = (base && base.id === activeAppId) ? cv : ((base && loadAppCv(base.id)) || cv);
+    const namePart = slug(baseCv.name) || 'CV';
     downloadJson(`${namePart}_Job-Pack-Template.json`,
       buildJobPackTemplate(baseCv, appDisplayLabel(base)));
   };
@@ -5940,8 +6063,24 @@ function App() {
     const source = pack.basedOn
       ? apps.find(a => appDisplayLabel(a) === pack.basedOn)
       : null;
+    // Falling back to "the" base is only safe when there is one. With several,
+    // a pack written for one person would land on somebody else's name and
+    // contact details, which the pack is not allowed to correct.
+    if (pack.basedOn && !source && apps.filter(a => a.isBase).length > 1) {
+      alert(`This pack was written for "${pack.basedOn}", and no base CV has that name.\n\n`
+        + 'Rename the right base CV to match, or change "basedOn" in the file, and import again.');
+      return;
+    }
     const base = source || apps.find(a => a.isBase) || apps[0];
     if (!base) { alert('There is no application to base these on.'); return; }
+    const baseCv = (base.id === activeAppId ? cv : loadAppCv(base.id)) || SEED_CV;
+    const shapeErrors = pack.entries.flatMap((e, i) =>
+      checkPackEntryAgainst(e, baseCv).map(msg => `Entry ${i + 1}: ${msg}`));
+    if (shapeErrors.length) {
+      alert(`Could not read that job pack:\n\n${shapeErrors.slice(0, 12).join('\n')}`
+        + (shapeErrors.length > 12 ? `\n…and ${shapeErrors.length - 12} more.` : ''));
+      return;
+    }
     const lines = pack.entries.map((e, i) =>
       `${i + 1}. ${[e.company, e.position].filter(Boolean).join(' — ')}`);
     const basedOnNote = pack.basedOn && !source
@@ -5952,7 +6091,6 @@ function App() {
       + `${lines.join('\n')}\n\nYour existing applications are left alone.${basedOnNote}`
     )) return;
 
-    const baseCv = loadAppCv(base.id) || SEED_CV;
     let baseHeadshot = null;
     try { baseHeadshot = await idbGet(appHeadshotKeyV2(base.id)); } catch {}
     const knownStatus = new Set(allStatuses.map(s => s.id));
@@ -5961,7 +6099,8 @@ function App() {
       const id = genId();
       // Fork first, then merge: deepMerge leaves untouched branches alone, so a
       // pack that only rewrites the summary keeps every other section verbatim.
-      const forked = deepMerge(JSON.parse(JSON.stringify(baseCv)), entry.overrides);
+      const forked = applyPackSections(
+        deepMerge(JSON.parse(JSON.stringify(baseCv)), entry.overrides), entry.sections);
       saveAppCv(id, forked);
       if (baseHeadshot) {
         try { await idbPut(appHeadshotKeyV2(id), baseHeadshot); } catch {}

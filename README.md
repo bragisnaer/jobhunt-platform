@@ -44,7 +44,10 @@ If you tailor several applications at once — by hand or with an AI reading job
 one into the app is the slow part. A job pack skips it.
 
 1. **Applications → Job pack template** downloads a JSON file. It is pre-filled with your base CV's real
-   summary and experience, and annotated throughout with instructions for whoever fills it in.
+   content — headline, profile, the numbers row, experience, education, honours, every sidebar list, and
+   each section's heading and whether it is shown — and annotated throughout with instructions for whoever
+   fills it in. If you keep more than one base CV (say, one for a friend you are helping), open that base
+   first and the template is built from it.
 2. Fill in one entry per job — **as many as you like in a single file**. If you are handing this to an AI,
    the file already tells it what each field is for, that it must not invent employers or achievements, and
    how the cover letter should be written.
@@ -58,6 +61,14 @@ The format carries **only what changes**. Each entry forks your base CV and merg
 top, so a pack that rewrites the profile paragraph and the cover letter leaves your experience, education,
 skills, theme, and template exactly as you set them. Fields you omit are inherited, which also means a
 sparse pack cannot damage anything — the second entry below is as valid as the first.
+
+`cv.sections` renames a section or hides and shows it for that one application, keyed by section id:
+`"sections": { "interests": { "visible": false }, "competencies": { "title": "Key Skills" } }`.
+
+Some things are never taken from a pack: your **name, contact details, the letter's sender block, photo,
+colours and template**. They are about you, not the job, and are ignored on import even if a pack sets
+them. A pack whose fields have the wrong shape — text where the CV has a list, say — is rejected with an
+error naming the entry and the field.
 
 ```json
 {
@@ -86,7 +97,8 @@ sparse pack cannot damage anything — the second entry below is as valid as the
 
 **Import is additive and never destructive** — unlike Restore, which replaces your whole dataset. Existing
 applications are never modified or deleted, and a malformed pack is rejected with an error naming the entry
-that is wrong rather than half-importing. Keys beginning with `_` are documentation and are stripped on
+that is wrong rather than half-importing. With more than one base CV, a pack whose `basedOn` matches none
+of them is refused rather than guessed at, so one person's pack can never land on another's CV. Keys beginning with `_` are documentation and are stripped on
 import, so the instructions can never end up on a CV.
 
 ## Keeping a copy of your data
