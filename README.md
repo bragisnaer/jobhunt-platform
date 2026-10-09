@@ -62,8 +62,13 @@ top, so a pack that rewrites the profile paragraph and the cover letter leaves y
 skills, theme, and template exactly as you set them. Fields you omit are inherited, which also means a
 sparse pack cannot damage anything — the second entry below is as valid as the first.
 
-`cv.sections` renames a section or hides and shows it for that one application, keyed by section id:
+`cv.sections` renames, hides, shows and reorders sections for that one application, keyed by section id:
 `"sections": { "interests": { "visible": false }, "competencies": { "title": "Key Skills" } }`.
+Sections appear in the order they are listed. A pack that lists only some of them swaps just those among
+the places they already hold, and everything else stays put. In the two-column templates, sidebar
+sections only move within the sidebar. The template also tells the AI it may repurpose a section the
+role needs but the CV lacks. For example, it can show the hidden "Additional" section, rename it
+"About Me" and move it to the top of the sidebar.
 
 Some things are never taken from a pack: your **name, contact details, the letter's sender block, photo,
 colours and template**. They are about you, not the job, and are ignored on import even if a pack sets

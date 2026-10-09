@@ -1570,7 +1570,7 @@ const JOB_PACK_CONTENT_KEYS = ['title', 'summary', 'metrics', 'experience', 'edu
 // model filling in a pack has no business guessing at them: one wrong digit in
 // an email address costs the application. These are dropped on import whatever
 // the pack says. `sidebar` and `sectionOrder` are reached through cv.sections
-// instead, which can rename and show/hide but cannot break the structure.
+// instead, which can rename, show/hide and reorder but cannot break the structure.
 const JOB_PACK_PROTECTED_CV_KEYS = ['name', 'contact', 'headshot', 'theme', 'templateId',
   'showCredit', 'creditText', 'sidebar', 'sectionOrder'];
 const JOB_PACK_PROTECTED_LETTER_KEYS = ['sender', 'signName'];
@@ -1598,7 +1598,8 @@ const JOB_PACK_INSTRUCTIONS = {
     'cv.experience': 'Replaces the whole experience list, so keep every job that is already here and edit inside it. Reword and reorder bullets to match the advert; you may drop a weak bullet, but never add an achievement that is not already somewhere in this file.',
     'cv.education / cv.honours': 'Replace their whole lists. Keep every entry; you may reword the notes and text to stress what is relevant.',
     'cv.<sidebar lists>': 'Every other list under "cv" is the content of one sidebar section — "cv.sections" says which heading each one sits under. Each replaces its whole list. Reorder so the most relevant items come first, and drop ones that do not help; add an item only if it is already evidenced elsewhere in this file. For languages, set "level" only — the bar fills from it.',
-    'cv.sections': 'Every section of the CV by id, with its heading and whether it is shown. Rename a heading or set "visible" to false to hide a section for this role (and true to show a hidden one). Ids cannot be added or changed.',
+    'cv.sections': 'Every section of the CV by id, with its heading and whether it is shown. Rename a heading, set "visible" to false to hide a section for this role (and true to show a hidden one), and reorder the entries to rearrange the CV: sections appear in the order you list them here. If you only list some sections, those swap places among themselves and the rest stay put. In the two-column templates a sidebar section only moves within the sidebar and a main section only within the main column. Ids cannot be added or changed.',
+    'Repurposing a section': 'If the role calls for a section this CV does not have, repurpose one instead of asking for a new one. Rename an existing heading to what you need, rewrite its content (the list or text named in "_contentIn") and move it where it belongs. For example, rename "profile" to "About Me", or show the hidden "additional" section, rename it and move it to the top of the sidebar. A hidden section is the best candidate, since nothing visible is lost. The content rules still apply: a renamed section may only hold what is already evidenced in this file.',
     'coverLetter.recipient': 'Hiring manager name, title, company and address if the advert gives them. Leave "" for any you do not know.',
     'coverLetter.subject': 'One line, e.g. "Application for Head of Operations".',
     'coverLetter.salutation': 'e.g. "Dear Hiring Manager," or the named person if you have one.',
@@ -1802,13 +1803,23 @@ function checkPackEntryAgainst(entry, baseCv) {
   return errors;
 }
 
-// Renames and shows/hides sections on an already-forked CV. Main-section
+// Renames, shows/hides and reorders sections on an already-forked CV. Main-section
 // headings live in sectionTitles and sidebar headings on the sidebar entry;
 // visibility lives in sectionOrder, with the sidebar's legacy flag kept in step.
+//
+// Order is the key order of cv.sections. A pack that lists only some sections
+// reorders just those among the slots they already hold, so every section it
+// leaves out stays exactly where it was — and a pack that keeps the template's
+// key order changes nothing.
 function applyPackSections(cv, sections) {
   if (!sections) return cv;
-  const order = ensureSectionOrder(cv).map(s =>
-    typeof (sections[s.id] || {}).visible === 'boolean' ? { ...s, visible: sections[s.id].visible } : s);
+  const base = ensureSectionOrder(cv);
+  const listed = Object.keys(sections).filter(id => base.some(s => s.id === id));
+  const byId = Object.fromEntries(base.map(s => [s.id, s]));
+  let next = 0;
+  const order = base
+    .map(s => listed.includes(s.id) ? byId[listed[next++]] : s)
+    .map(s => typeof (sections[s.id] || {}).visible === 'boolean' ? { ...s, visible: sections[s.id].visible } : s);
   const sectionTitles = { ...(cv.sectionTitles || {}) };
   for (const id of MAIN_SECTION_IDS) {
     if (sections[id] && typeof sections[id].title === 'string') sectionTitles[id] = sections[id].title;
